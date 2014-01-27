@@ -42,7 +42,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
         if len == 0 {
             return None;
         }
-        
+
         let mut token_end = 1;
         let token = match self.remaining.char_at(0) {
             '(' => LeftParen,
@@ -82,7 +82,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                     }
                 }
             },
-            
+
             '0'..'9' => {
                 token_end = scan_token(self.remaining);
                 match from_str(self.remaining.slice_to(token_end)) {
@@ -104,7 +104,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                 }
             }
         };
-        
+
         self.remaining = self.remaining.slice_from(token_end).trim_left();
         Some(token)
     }

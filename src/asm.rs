@@ -1,4 +1,4 @@
-/// 
+///
 /// Description: Methods for converting input from trans to CHIP8 code
 ///
 
@@ -107,5 +107,3 @@ fn addr_opcode(addr: Addr) -> u16 {
     assert!(addr < 0xFFF);
     addr
 }
-
-

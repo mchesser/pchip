@@ -1,11 +1,11 @@
-/// 
+///
 /// Description: Translate from pchip to assembly
 ///
 
 mod asm;
 
 /*
-system keywords: 
+system keywords:
     __clear      -- Clear
     __draw       -- Draw(Num, Num, Num)
     __random     -- Random(Num, Num)
