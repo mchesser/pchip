@@ -1,4 +1,4 @@
-pchip
+PChip
 =====
 
-A simple programming language for Chip8
+A simple WIP programming language for Chip8.
