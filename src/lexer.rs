@@ -1,7 +1,8 @@
 ///
-/// Description: Lex the source code into tokens
+/// Description: Parse the source code into tokens
 ///
 
+#[deriving(Eq, Clone)]
 pub enum Token {
     LeftParen,
     RightParen,
@@ -16,12 +17,14 @@ pub enum Token {
     Loop,
     Else,
     Fn,
-    String(~str),
+    NonKeyWord(~str),
     Equal,
     Plus,
     PlusEq,
     Minus,
-    MinusEq
+    MinusEq,
+    StatementEnd,
+    Eof,
 }
 
 pub struct Lexer<'a> {
@@ -49,6 +52,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
             ')' => RightParen,
             '{' => LeftBrace,
             '}' => RightBrace,
+            ';' => StatementEnd,
             '=' => {
                 if len == 1 {
                     Assignment
@@ -92,7 +96,8 @@ impl<'a> Iterator<Token> for Lexer<'a> {
             },
             _ => {
                 token_end = scan_token(self.remaining);
-                match self.remaining.slice_to(token_end) {
+                let token_string = self.remaining.slice_to(token_end);
+                match token_string{
                     "let"   => Let,
                     "if"    => If,
                     "for"   => For,
@@ -100,7 +105,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                     "loop"  => Loop,
                     "else"  => Else,
                     "fn"    => Fn,
-                    _       => String(self.remaining.slice_to(token_end).to_owned())
+                    _       => NonKeyWord(token_string.to_owned())
                 }
             }
         };
@@ -112,7 +117,12 @@ impl<'a> Iterator<Token> for Lexer<'a> {
 
 /// Scans till the end of the token returning the index of the end of the token
 fn scan_token(string: &str) -> uint {
-    static TOKEN_BOUNDS: &'static [char] = &[' ', '\t', '\n', '(', ')', '{', '}', '.', '='];
+    static TOKEN_BOUNDS: &'static [char] = &[
+        ' ', '\t', '\n', ';',
+        '(', ')', '{', '}',
+        '.',
+        '=', '+', '-'
+    ];
     match string.find(TOKEN_BOUNDS) {
         Some(n) => n,
         None    => string.len()

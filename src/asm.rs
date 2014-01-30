@@ -2,8 +2,8 @@
 /// Description: Methods for converting input from trans to CHIP8 code
 ///
 
-struct RegId(u8);
-struct Addr(u16)
+pub struct RegId(u8);
+pub struct Addr(u16);
 
 /// An operation supported by Chip8
 pub enum Operation {
@@ -31,7 +31,7 @@ pub enum Operation {
     Random(RegId, u8),
     Draw(RegId, RegId, u8),
     KeyDown(RegId),
-    KeyUp(RegId)
+    KeyUp(RegId),
     KeyWait(RegId),
     GetDelay(RegId),
     SetDelay(RegId),
@@ -41,7 +41,6 @@ pub enum Operation {
     BCD(RegId),
     Write(RegId),
     Read(RegId)
-
 }
 
 fn to_opcode(op: Operation) -> u16 {
@@ -68,7 +67,7 @@ fn to_opcode(op: Operation) -> u16 {
         SetAddress(addr)       => 0xA000 | addr_opcode(addr),
         Jump2(addr)            => 0xB000 | addr_opcode(addr),
         Random(id, value)      => 0xC000 | reg_value_opcode(id, value),
-        Draw(id1, id2, h)      => 0xD000 | reg_reg_opcode(id1, id2) | h,
+        Draw(id1, id2, h)      => 0xD000 | reg_reg_opcode(id1, id2) | h as u16,
         KeyDown(id)            => 0xE09E | reg_opcode(id),
         KeyUp(id)              => 0xE0A1 | reg_opcode(id),
         KeyWait(id)            => 0xF00A | reg_opcode(id),
@@ -85,21 +84,21 @@ fn to_opcode(op: Operation) -> u16 {
 
 fn reg_value_opcode(reg: RegId, value: u8) -> u16 {
     let RegId(id) = reg;
-    assert!(reg < 0x10);
+    assert!(id < 0x10);
     ((id as u16) << 8) | (value as u16)
 }
 
 fn reg_reg_opcode(reg1: RegId, reg2: RegId) -> u16 {
     let RegId(id1) = reg1;
     let RegId(id2) = reg2;
-    assert!(reg1 < 0x10 && reg2 < 0x10);
+    assert!(id1 < 0x10 && id2 < 0x10);
     ((id1 as u16) << 8) | ((id2 as u16) << 4)
 }
 
 fn reg_opcode(reg: RegId) -> u16 {
     let RegId(id) = reg;
-    assert!(reg < 0x10);
-    ((id1 as u16) << 8)
+    assert!(id < 0x10);
+    ((id as u16) << 8)
 }
 
 fn addr_opcode(addr: Addr) -> u16 {
