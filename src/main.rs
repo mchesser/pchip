@@ -1,11 +1,6 @@
-use lexer::Lexer;
-
-mod lexer;
+mod parser;
 
 fn main() {
-    let input = &"let a = 10\nfor i == 30\nlet b = (1)";
-    let mut lexer = Lexer::new(input);
-    for token in lexer {
-        println!("{:?}", token);
-    }
+    let input = &"let a = 10\nlet b = a + 5";
+    println!("{:?}", parser::Parser::evaluate(input));
 }
