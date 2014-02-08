@@ -1,27 +1,19 @@
 use std::io::File;
+use std::os;
 
 mod parser;
 
 fn main() {
-    let input =
-r#"{
-let x = 0;
-loop {
-    __clear();
-    __draw_pos(x, 5);
-    __get_font(3);
-    __draw(5);
-    x = x + 1;
-    __key_wait(0);
-}
-}"#;
-
-    let code = parser::parse(input);
-    for &op in code.iter() {
-        print!("{:02x}", op);
+    let args = os::args();
+    if args.len() != 2 {
+        println!("Invalid usage");
+        return;
     }
-    println!("");
-
-    let mut file = File::create(&Path::new("a.out"));
-    file.write(code);
+    let input = match File::open(&Path::new(args[1])) {
+        Some(mut f) => f.read_to_str(),
+        None => { println!("Error reading file"); return; }
+    };
+    let code = parser::parse(input);
+    let mut output = File::create(&Path::new("program.ch8"));
+    output.write(code);
 }
