@@ -9,7 +9,8 @@ pub enum Token {
     LeftBrace,
     RightBrace,
     Assignment,
-    Num(u16),
+    Comma,
+    LitNum(u16),
     Let,
     If,
     For,
@@ -17,7 +18,7 @@ pub enum Token {
     Loop,
     Else,
     Fn,
-    NonKeyWord(~str),
+    Ident(~str),
     Equal,
     Plus,
     PlusEq,
@@ -53,10 +54,9 @@ impl<'a> Iterator<Token> for Lexer<'a> {
             '{' => LeftBrace,
             '}' => RightBrace,
             ';' => StatementEnd,
+            ',' => Comma,
             '=' => {
-                if len == 1 {
-                    Assignment
-                }
+                if len == 1 { Assignment }
                 else {
                     match self.remaining.char_at(1) {
                         '=' => { token_end += 1; Equal },
@@ -65,9 +65,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                 }
             },
             '+' => {
-                if len == 1 {
-                    Plus
-                }
+                if len == 1 { Plus }
                 else {
                     match self.remaining.char_at(1) {
                         '=' => { token_end += 1; PlusEq },
@@ -76,9 +74,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                 }
             },
             '-' => {
-                if len == 1 {
-                    Minus
-                }
+                if len == 1 { Minus }
                 else {
                     match self.remaining.char_at(1) {
                         '=' => { token_end += 1; MinusEq },
@@ -90,7 +86,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
             '0'..'9' => {
                 token_end = scan_token(self.remaining);
                 match from_str(self.remaining.slice_to(token_end)) {
-                    Some(n) => Num(n),
+                    Some(n) => LitNum(n),
                     None    => fail!("Invalid number")
                 }
             },
@@ -105,11 +101,12 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                     "loop"  => Loop,
                     "else"  => Else,
                     "fn"    => Fn,
-                    _       => NonKeyWord(token_string.to_owned())
+                    "true"  => LitNum(1),
+                    "false" => LitNum(0),
+                    _       => Ident(token_string.to_owned())
                 }
             }
         };
-
         self.remaining = self.remaining.slice_from(token_end).trim_left();
         Some(token)
     }
@@ -118,10 +115,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
 /// Scans till the end of the token returning the index of the end of the token
 fn scan_token(string: &str) -> uint {
     static TOKEN_BOUNDS: &'static [char] = &[
-        ' ', '\t', '\n', ';',
-        '(', ')', '{', '}',
-        '.',
-        '=', '+', '-'
+        ' ', '\t', '\n', ';', ',', '(', ')', '{', '}', '.', '=', '+', '-'
     ];
     match string.find(TOKEN_BOUNDS) {
         Some(n) => n,

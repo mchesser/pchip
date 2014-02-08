@@ -1,6 +1,10 @@
+#[allow(dead_code)];
 ///
-/// Description: Methods for converting input from trans to CHIP8 code
+/// Description: Convert to bytes
 ///
+
+use std::vec;
+use parser::trans;
 
 pub struct RegId(u8);
 pub struct Addr(u16);
@@ -41,6 +45,47 @@ pub enum Operation {
     BCD(RegId),
     Write(RegId),
     Read(RegId)
+}
+
+pub fn compile(code: ~[trans::Operation], num_markers: uint) -> ~[u8] {
+    static BASE_ADDRESS: u16 = 0x200;
+    let mut actual_ops = ~[];
+    let mut markers = vec::from_elem(num_markers, BASE_ADDRESS);
+    for operation in code.move_iter() {
+        match operation {
+            trans::Marker(id) => markers[id] = BASE_ADDRESS + 2 * actual_ops.len() as u16,
+            actual_op  => actual_ops.push(actual_op)
+        }
+    }
+    let data_offset = BASE_ADDRESS + 2 * actual_ops.len() as u16;
+    let opcodes: ~[u16] = actual_ops.move_iter().map(|operation| {
+        match operation {
+            trans::RawOp(op) => op,
+            trans::UnknownAddr(op, addr) => {
+                let raw_addr = match addr {
+                    trans::VariableAddress(id) => Addr(data_offset + id as u16),
+                    trans::FunctionAddress(_) => fail!("Unimplemented"),
+                    trans::MarkerAddress(id) => Addr(markers[id]),
+                    trans::RawAddress(address) => Addr(address),
+                };
+                match op {
+                    Jump(_) => Jump(raw_addr),
+                    Call(_) => Call(raw_addr),
+                    SetAddress(_) => SetAddress(raw_addr),
+                    Jump2(_) => Jump2(raw_addr),
+                    _ => fail!("`{:?}` does not require an address", op)
+                }
+            },
+            _ => fail!("Unreachable code")
+        }
+    }).map(|operation| to_opcode(operation)).collect();
+
+    let mut bytes = ~[];
+    for &opcode in opcodes.iter() {
+        bytes.push((opcode >> 8) as u8);
+        bytes.push(opcode as u8);
+    }
+    bytes
 }
 
 fn to_opcode(op: Operation) -> u16 {
