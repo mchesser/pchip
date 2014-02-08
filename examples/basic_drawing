@@ -1,0 +1,11 @@
+{
+    let x = 0;
+    loop {
+        __clear();
+        __draw_pos(x, 5);
+        __get_font(3);
+        __draw(5);
+        x = x + 1;
+        __key_wait(0);
+    }
+}
