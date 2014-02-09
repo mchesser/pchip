@@ -41,19 +41,9 @@ impl MarkerStack {
         self.markers.pop()
     }
 
-    /// Keep poping markers until a marker of the correct type is found
-    fn pop_until(&mut self, block_type: BlockType) -> (BlockType, MarkerId) {
-        loop {
-            let (btype, id) = self.pop();
-            if btype == block_type {
-                return (btype, id);
-            }
-        }
-    }
-
-    /// Get the last marker added
-    fn top(&self) -> (BlockType, MarkerId) {
-        *self.markers.last()
+    /// Find the top most marker of the specified type
+    fn find_type(&mut self, block_type: BlockType) -> Option<MarkerId> {
+        self.markers.rev_iter().find(|& &(btype, _)| btype == block_type).map(|&(_, id)| id)
     }
 }
 
@@ -124,6 +114,7 @@ impl Parser {
             lexer::While => fail!("ICE: Unimplemented"),
             lexer::Fn => fail!("ICE: Unimplemented"),
             lexer::Loop => self.parse_loop(),
+            lexer::Break => self.parse_break(),
             lexer::Ident(ref s) => self.parse_ident_statement(s),
             xx => fail!("Unexpected token found: `{:?}`", xx)
         }
@@ -206,6 +197,22 @@ impl Parser {
         // Add the jump back to the start of the loop
         loop_block.statements.push(trans::Jump(loop_block.start_id));
         trans::Loop(loop_block)
+    }
+
+    fn parse_break(&mut self) -> trans::Statement {
+        let jump_id = match self.marker_stack.find_type(LoopBlock) {
+            Some(id) => id,
+            None => fail!("Error: `Break` is not valid here.")
+        };
+
+        self.pos += 1;
+        match self.code[self.pos].clone() {
+            lexer::StatementEnd => {
+                self.pos += 1;
+                trans::Jump(jump_id)
+            },
+            xx => fail!("Error: expected `StatementEnd` but found `{:?}`", xx),
+        }
     }
 
     fn parse_expression(&mut self) -> trans::Expression {
