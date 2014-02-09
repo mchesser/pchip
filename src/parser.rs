@@ -96,6 +96,7 @@ impl Parser {
             },
             xx => fail!("Error: expected `LeftBrace` but found `{:?}`", xx)
         }
+        self.pos += 1;
         // Get the block markers
         let (_, end_id) = self.marker_stack.pop();
         let (_, start_id) = self.marker_stack.pop();
