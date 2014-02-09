@@ -7,7 +7,7 @@ A simple WIP programming language for Chip8.
 
 This is a first attempt at a very simple programming language and compiler. This was initially created to write programs to test my [Chip8 emulator](https://github.com/quvarxa/chip8-rs) which currently has a few bugs in it. However it turned out to be far more complicated than the emulator.
 
-Sample programs that can be compiled can be found in `\samples`.
+Sample programs that can be compiled can be found in `examples`.
 
 ## Some notes
 
