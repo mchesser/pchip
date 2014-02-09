@@ -82,7 +82,20 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                     }
                 }
             },
-
+            '#' => {
+                token_end = 0;
+                let iter = self.remaining.splitn('\n', 1);
+                match iter.skip(1).next() {
+                    Some(str) => {
+                        self.remaining = str;
+                        match self.next() {
+                            Some(s) => s,
+                            None => Eof,
+                        }
+                    },
+                    None => Eof
+                }
+            },
             '0'..'9' => {
                 token_end = scan_token(self.remaining);
                 match from_str(self.remaining.slice_to(token_end)) {
