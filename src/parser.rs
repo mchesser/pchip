@@ -121,6 +121,13 @@ impl Parser {
         }
     }
 
+    fn parse_statement_end(&mut self) {
+        match self.code[self.pos].clone() {
+            lexer::StatementEnd => self.pos += 1,
+            xx => fail!("Error: expected `StatementEnd` but found `{:?}`", xx)
+        }
+    }
+
     fn parse_let(&mut self) -> trans::Statement {
         self.pos += 1;
         // Determine the variables name
@@ -146,24 +153,18 @@ impl Parser {
                 // Parse the assignment
                 self.parse_assignment(self.var_index-1)
             },
-            lexer::StatementEnd => {
-                self.pos += 1;
+            _ => {
+                self.parse_statement_end();
                 // Variable declaration without assignment is a NOP
                 trans::Nop
             },
-            xx => fail!("Error: expected `Assignment` or `StatementEnd` but found `{:?}`", xx),
         }
     }
 
     fn parse_assignment(&mut self, var_id: VarId) -> trans::Statement {
         // Parse the rhs expression
         let expr = self.parse_expression();
-        // Check for statement end
-        match self.code[self.pos].clone() {
-            lexer::StatementEnd => {},
-            xx => fail!("Error: expected `StatementEnd` but found `{:?}`", xx)
-        }
-        self.pos += 1;
+        self.parse_statement_end();
         trans::Assignment(var_id, expr)
     }
 
@@ -207,13 +208,9 @@ impl Parser {
         };
 
         self.pos += 1;
-        match self.code[self.pos].clone() {
-            lexer::StatementEnd => {
-                self.pos += 1;
-                trans::Jump(jump_id)
-            },
-            xx => fail!("Error: expected `StatementEnd` but found `{:?}`", xx),
-        }
+
+        self.parse_statement_end();
+        trans::Jump(jump_id)
     }
 
     fn parse_expression(&mut self) -> trans::Expression {
@@ -324,10 +321,7 @@ impl Parser {
             fail!("Expected `RightParen` but found `{:?}`", self.code[self.pos]);
         }
         self.pos += 1;
-        if self.code[self.pos].clone() != lexer::StatementEnd {
-            fail!("Expected `StatementEnd` but found `{:?}`", self.code[self.pos]);
-        }
-        self.pos += 1;
+        self.parse_statement_end();
         trans::DrawPos(x_expr, y_expr)
     }
 
@@ -348,10 +342,7 @@ impl Parser {
             fail!("Expected `RightParen` but found {:?}", self.code[self.pos]);
         }
         self.pos += 1;
-        if self.code[self.pos].clone() != lexer::StatementEnd {
-            fail!("Expected `StatementEnd` but found {:?}", self.code[self.pos]);
-        }
-        self.pos += 1;
+        self.parse_statement_end();
         command
     }
 
@@ -365,10 +356,7 @@ impl Parser {
             fail!("Expected `RightParen` but found {:?}", self.code[self.pos]);
         }
         self.pos += 1;
-        if self.code[self.pos].clone() != lexer::StatementEnd {
-            fail!("Expected `StatementEnd` but found {:?}", self.code[self.pos]);
-        }
-        self.pos += 1;
+        self.parse_statement_end();
         trans::GetFont(expr)
     }
 
@@ -382,10 +370,7 @@ impl Parser {
             fail!("Expected `RightParen` but found {:?}", self.code[self.pos]);
         }
         self.pos += 1;
-        if self.code[self.pos].clone() != lexer::StatementEnd {
-            fail!("Expected `StatementEnd` but found {:?}", self.code[self.pos]);
-        }
-        self.pos += 1;
+        self.parse_statement_end();
         trans::KeyWait(expr)
     }
 
