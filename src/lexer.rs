@@ -87,7 +87,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                 let iter = self.remaining.splitn('\n', 1);
                 match iter.skip(1).next() {
                     Some(str) => {
-                        self.remaining = str;
+                        self.remaining = str.trim_left();
                         match self.next() {
                             Some(s) => s,
                             None => Eof,
@@ -128,7 +128,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
 /// Scans till the end of the token returning the index of the end of the token
 fn scan_token(string: &str) -> uint {
     static TOKEN_BOUNDS: &'static [char] = &[
-        ' ', '\t', '\n', ';', ',', '(', ')', '{', '}', '.', '=', '+', '-'
+        ' ', '\t', '\n', '#', ';', ',', '(', ')', '{', '}', '.', '=', '+', '-'
     ];
     match string.find(TOKEN_BOUNDS) {
         Some(n) => n,
