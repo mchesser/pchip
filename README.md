@@ -22,9 +22,10 @@ Sample programs that can be compiled can be found in `examples`.
 
 ### Missing features
 
-* Support for comments
+* <del>Support for comments</del>
+* <del>Breaking in loops</del>
 * While loops
-* For for loops
+* For loops
 * Functions
 * Inline functions
 * Several important operators (Or, Xor, Equals, NotEquals, LessThan, GreaterThan, ...)
