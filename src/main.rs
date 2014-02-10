@@ -9,11 +9,19 @@ fn main() {
         println!("Invalid usage");
         return;
     }
-    let input = match File::open(&Path::new(args[1])) {
-        Some(mut f) => f.read_to_str(),
-        None => { println!("Error reading file"); return; }
+    let mut file = match File::open(&Path::new(args[1])) {
+        Ok(f)    => f,
+        Err(err) => fail!("Error openning file: {:?}", err)
+    };
+    let input = match file.read_to_str() {
+        Ok(input) => input,
+        Err(err)  => fail!("Error reading file: {:?}", err)
     };
     let code = parser::parse(input);
     let mut output = File::create(&Path::new("program.ch8"));
-    output.write(code);
+
+    match output.write(code) {
+        Ok(_)    => {},
+        Err(err) => println!("Failed to write to file: {:?}", err)
+    }
 }

@@ -18,7 +18,7 @@ enum BlockType {
 }
 
 struct MarkerStack {
-    priv markers: ~[(BlockType, MarkerId)],
+    markers: ~[(BlockType, MarkerId)],
     last_marker: MarkerId
 }
 
@@ -37,7 +37,7 @@ impl MarkerStack {
     }
 
     /// Pop the last marker added
-    fn pop(&mut self) -> (BlockType, MarkerId) {
+    fn pop(&mut self) -> Option<(BlockType, MarkerId)> {
         self.markers.pop()
     }
 
@@ -98,8 +98,14 @@ impl Parser {
         }
         self.pos += 1;
         // Get the block markers
-        let (_, end_id) = self.marker_stack.pop();
-        let (_, start_id) = self.marker_stack.pop();
+        let (_, end_id) = match self.marker_stack.pop() {
+            Some(marker) => marker,
+            None => fail!("Unexpected error")
+        };
+        let (_, start_id) = match self.marker_stack.pop() {
+            Some(marker) => marker,
+            None => fail!("Unexpected error")
+        };
         trans::Block {
             statements: statements,
             start_id: start_id,
