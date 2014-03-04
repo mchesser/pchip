@@ -18,12 +18,12 @@ Sample programs that can be compiled can be found in `examples`.
 * No optimisation resulting in very inefficient programs
 * Very few of the registers are used
 * No constant folding
-* Expressions are parsed incorrectly (e.g. `4 + 3 - 2 + 1` is parsed as `4 + (3 - (2 + 1))`)
 
 ### Missing features
 
 * <del>Support for comments</del>
 * <del>Breaking in loops</del>
+* Support for infix operators
 * While loops
 * For loops
 * Functions
