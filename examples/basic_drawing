@@ -3,11 +3,10 @@
 {
     let x = 0;
     loop {
-        __draw_pos(x, 5);
-        __get_font(1);
-        __draw(5);
-        __key_wait(0);
-        __draw(5);
-        x = x + 1;
+        draw_pos(x, 5);
+        draw5(get_font(1));
+        key_wait();
+        clear();
+        x = plus(x, 1);
     }
 }

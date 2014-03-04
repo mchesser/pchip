@@ -2,7 +2,7 @@
 /// Description: Parse the source code into tokens
 ///
 
-#[deriving(Eq, Clone)]
+#[deriving(Eq, Clone, Show)]
 pub enum Token {
     LeftParen,
     RightParen,

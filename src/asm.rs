@@ -1,4 +1,3 @@
-#[allow(dead_code)];
 ///
 /// Description: Convert to bytes
 ///
@@ -6,10 +5,13 @@
 use std::vec;
 use parser::trans;
 
-pub struct RegId(u8);
-pub struct Addr(u16);
+static BASE_ADDRESS: u16 = 0x200;
+
+pub type RegId = u8;
+pub type Addr = u16;
 
 /// An operation supported by Chip8
+#[deriving(Show, Clone)]
 pub enum Operation {
     Clear,
     Return,
@@ -47,36 +49,80 @@ pub enum Operation {
     Read(RegId)
 }
 
-pub fn compile(code: ~[trans::Operation], num_markers: uint) -> ~[u8] {
-    static BASE_ADDRESS: u16 = 0x200;
-    let mut actual_ops = ~[];
-    let mut markers = vec::from_elem(num_markers, BASE_ADDRESS);
-    for operation in code.move_iter() {
-        match operation {
-            trans::Marker(id) => markers[id] = BASE_ADDRESS + 2 * actual_ops.len() as u16,
-            actual_op  => actual_ops.push(actual_op)
+#[deriving(Clone, Show)]
+enum FunctionAddress {
+    FnAddress(u16),
+    Inline(~[trans::Operation]),
+}
+
+pub fn compile(mut functions: ~[trans::Function], main_id: uint, num_vars: uint,
+        num_markers: uint) -> ~[u8] {
+
+    functions.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut current_address = BASE_ADDRESS;
+
+    let mut vars = vec::from_elem(num_vars, 0u16);
+    let mut funcs = vec::from_elem(functions.len(), FnAddress(0));
+    let mut markers = vec::from_elem(num_markers, 0u16);
+
+    // Add the jump to the main function
+    let mut actual_ops = ~[trans::UnknownAddr(Jump(0), trans::FunctionAddress(main_id))];
+    current_address += 2;
+
+    for function in functions.move_iter() {
+        if function.inline {
+            let id = function.id;
+            funcs[id] = Inline(function.code);
+        }
+        else {
+            funcs[function.id] = FnAddress(current_address);
+            for operation in function.code.move_iter() {
+                match operation {
+                    trans::Marker(id) => {
+                        markers[id] = current_address;
+                    },
+                    actual_op => {
+                        actual_ops.push(actual_op);
+                        current_address += 2;
+                    },
+                }
+            }
+            // Add return
+            actual_ops.push(trans::RawOp(Return));
+            current_address += 2;
         }
     }
-    let data_offset = BASE_ADDRESS + 2 * actual_ops.len() as u16;
+
+    // Allocate space for variables
+    for var in vars.mut_iter() {
+        *var = current_address;
+        current_address += 2;
+    }
+
     let opcodes: ~[u16] = actual_ops.move_iter().map(|operation| {
         match operation {
             trans::RawOp(op) => op,
             trans::UnknownAddr(op, addr) => {
                 let raw_addr = match addr {
-                    trans::VariableAddress(id) => Addr(data_offset + id as u16),
-                    trans::FunctionAddress(_) => fail!("Unimplemented"),
-                    trans::MarkerAddress(id) => Addr(markers[id]),
-                    trans::RawAddress(address) => Addr(address),
+                    trans::VariableAddress(id) => vars[id],
+                    trans::FunctionAddress(id) => {
+                        match funcs[id] {
+                            FnAddress(addr) => addr,
+                            Inline(_) => fail!("ICE: Call to inline function found"),
+                        }
+                    },
+                    trans::MarkerAddress(id)   => markers[id],
+                    trans::RawAddress(address) => address,
                 };
                 match op {
-                    Jump(_) => Jump(raw_addr),
-                    Call(_) => Call(raw_addr),
+                    Jump(_)       => Jump(raw_addr),
+                    Call(_)       => Call(raw_addr),
                     SetAddress(_) => SetAddress(raw_addr),
-                    Jump2(_) => Jump2(raw_addr),
-                    _ => fail!("`{:?}` does not require an address", op)
+                    Jump2(_)      => Jump2(raw_addr),
+                    xx            => fail!("ICE: `{}` does not require an address", xx)
                 }
             },
-            _ => fail!("Unreachable code")
+            _ => unreachable!()
         }
     }).map(|operation| to_opcode(operation)).collect();
 
@@ -85,6 +131,7 @@ pub fn compile(code: ~[trans::Operation], num_markers: uint) -> ~[u8] {
         bytes.push((opcode >> 8) as u8);
         bytes.push(opcode as u8);
     }
+
     bytes
 }
 
@@ -128,26 +175,25 @@ fn to_opcode(op: Operation) -> u16 {
 }
 
 fn reg_value_opcode(reg: RegId, value: u8) -> u16 {
-    let RegId(id) = reg;
+    let id = reg;
     assert!(id < 0x10);
     ((id as u16) << 8) | (value as u16)
 }
 
 fn reg_reg_opcode(reg1: RegId, reg2: RegId) -> u16 {
-    let RegId(id1) = reg1;
-    let RegId(id2) = reg2;
+    let id1 = reg1;
+    let id2 = reg2;
     assert!(id1 < 0x10 && id2 < 0x10);
     ((id1 as u16) << 8) | ((id2 as u16) << 4)
 }
 
 fn reg_opcode(reg: RegId) -> u16 {
-    let RegId(id) = reg;
+    let id = reg;
     assert!(id < 0x10);
     ((id as u16) << 8)
 }
 
 fn addr_opcode(addr: Addr) -> u16 {
-    let Addr(addr) = addr;
     assert!(addr < 0xFFF);
     addr
 }

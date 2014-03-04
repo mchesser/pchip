@@ -1,25 +1,15 @@
-///
-/// Description: Parse soruce code, returning a vector of bytes representing the compiled program
-///
+extern crate collections;
 
-use std::hashmap::HashMap;
-use parser::trans::MarkerId;
-use parser::trans::VarId;
+use parser::collections::HashMap;
 
 mod lexer;
+mod ast;
 mod trans;
 mod asm;
 
-#[deriving(Eq)]
-enum BlockType {
-    IfBlock,
-    LoopBlock,
-    FunctionBlock,
-}
-
 struct MarkerStack {
-    markers: ~[(BlockType, MarkerId)],
-    last_marker: MarkerId
+    markers: ~[(ast::BlockType, ast::Marker)],
+    last_marker: ast::MarkerId,
 }
 
 impl MarkerStack {
@@ -31,30 +21,57 @@ impl MarkerStack {
     }
 
     /// Add a new marker to the marker stack
-    fn push(&mut self, block_type: BlockType) {
-        self.markers.push((block_type, self.last_marker));
-        self.last_marker += 1;
+    fn add(&mut self, block_type: ast::BlockType) {
+        let marker = ast::Marker {
+            start: self.last_marker,
+            end: self.last_marker + 1,
+        };
+        self.markers.push((block_type, marker));
+        self.last_marker += 2;
+    }
+
+    /// Get what the next marker would be
+    fn get(&mut self) -> ast::Marker {
+        self.last_marker += 2;
+        ast::Marker {
+            start: self.last_marker - 2,
+            end: self.last_marker - 1,
+        }
     }
 
     /// Pop the last marker added
-    fn pop(&mut self) -> Option<(BlockType, MarkerId)> {
-        self.markers.pop()
+    fn pop(&mut self) -> ast::Marker {
+        match self.markers.pop() {
+            Some((_, marker)) => marker,
+            None => fail!("ICE: Marker stack was empty when pop was called"),
+        }
     }
 
     /// Find the top most marker of the specified type
-    fn find_type(&mut self, block_type: BlockType) -> Option<MarkerId> {
+    fn find_type(&mut self, block_type: ast::BlockType) -> Option<ast::Marker> {
         self.markers.rev_iter().find(|& &(btype, _)| btype == block_type).map(|&(_, id)| id)
     }
 }
 
-static SYSTEM_CALLS: [&'static str, ..8] = [
-    "__clear", "__draw_pos", "__set_addr", "__draw", "__random", "__set_delay",
-    "__get_font", "__key_wait"
-];
+fn check_expr_type(expr: &ast::Expression, rtype: ast::ReturnType) {
+    assert!(expr.rtype == rtype);
+}
+
+fn check_block_type(block: &ast::Block, rtype: ast::ReturnType) {
+    assert!(block.return_type() == rtype);
+}
+
+enum BlockItem {
+    Statement(ast::Expression),
+    Expression(ast::Expression),
+    BlockEnd,
+}
 
 struct Parser {
-    variables: HashMap<~str, VarId>,
-    var_index: VarId,
+    variables: HashMap<~str, ast::Variable>,
+    var_index: ast::VarId,
+    functions: HashMap<~str, ast::Function>,
+    fn_index: ast::FnId,
     marker_stack: MarkerStack,
     code: ~[lexer::Token],
     pos: uint,
@@ -64,329 +81,489 @@ pub fn parse(source_code: &str) -> ~[u8] {
     let mut parser = Parser {
         variables: HashMap::new(),
         var_index: 0,
+        functions: HashMap::new(),
+        fn_index: 0,
         marker_stack: MarkerStack::new(),
         code: lexer::Lexer::new(source_code).collect(),
         pos: 0,
     };
-    println!("{:?}\n", parser.code);
-    let ops = trans::block_to_asm(parser.parse_block(FunctionBlock));
-    for op in ops.iter() {
-        println!("{:?}", op);
-    }
+
+    println!("--------------| INPUT | --------------")
+    println!("{}", source_code);
     println!("");
-    asm::compile(ops, parser.marker_stack.last_marker)
+
+    println!("--------------| LEXER | --------------");
+    println!("{:?}", parser.code);
+    println!("");
+
+    //
+    // Register chip8 system functions
+    //
+
+    // clear()
+    let marker = parser.marker_stack.get();
+    parser.register_function(
+        "clear", ~[],
+        ast::Block {
+            statements: ~[
+                ast::Expression {
+                    expr: ast::AsmOperation(asm::Clear),
+                    rtype: ast::UnitType
+                },
+            ],
+            marker: marker,
+        }
+    );
+
+    // draw_pos(x, y)
+    let marker = parser.marker_stack.get();
+    parser.register_function(
+        "draw_pos", ~[ast::U8Type, ast::U8Type],
+        ast::Block {
+            statements: ~[
+                ast::Expression {
+                    expr: ast::Variable(0),
+                    rtype: ast::U8Type,
+                },
+                ast::Expression {
+                    expr: ast::AsmOperation(asm::Set(0xD, 0x0)),
+                    rtype: ast::UnitType,
+                },
+                ast::Expression {
+                    expr: ast::Variable(1),
+                    rtype: ast::U8Type,
+                },
+                ast::Expression {
+                    expr: ast::AsmOperation(asm::Set(0xE, 0x0)),
+                    rtype: ast::UnitType,
+                },
+            ],
+            marker: marker,
+        }
+    );
+
+    // draw5(x, y, glyph_address)
+    let marker = parser.marker_stack.get();
+    parser.register_function(
+        "draw5", ~[ast::AddressType],
+        ast::Block {
+            statements: ~[
+                ast::Expression {
+                    expr: ast::AsmOperation(asm::Draw(0xD, 0xE, 5)),
+                    rtype: ast::UnitType,
+                },
+            ],
+            marker: marker,
+        }
+    );
+
+    // get_font(char_code)
+    let marker = parser.marker_stack.get();
+    parser.register_function(
+        "get_font", ~[ast::U8Type],
+        ast::Block {
+            statements: ~[
+                ast::Expression {
+                    expr: ast::Variable(3),
+                    rtype: ast::U8Type,
+                },
+                ast::Expression {
+                    expr: ast::AsmOperation(asm::GetFont(0x0)),
+                    rtype: ast::AddressType,
+                },
+            ],
+            marker: marker,
+        }
+    );
+
+    // key_wait()
+    let marker = parser.marker_stack.get();
+    parser.register_function(
+        "key_wait", ~[],
+        ast::Block {
+            statements: ~[
+                ast::Expression {
+                    expr: ast::AsmOperation(asm::KeyWait(0x0)),
+                    rtype: ast::U8Type,
+                },
+            ],
+            marker: marker,
+        }
+    );
+
+    // plus(a, b)
+    let marker = parser.marker_stack.get();
+    parser.register_function(
+        "plus", ~[ast::U8Type, ast::U8Type],
+        ast::Block {
+            statements: ~[
+                ast::Expression {
+                    expr: ast::Variable(4),
+                    rtype: ast::U8Type,
+                },
+                ast::Expression {
+                    expr: ast::AsmOperation(asm::Set(0x1, 0x0)),
+                    rtype: ast::UnitType,
+                },
+                ast::Expression {
+                    expr: ast::Variable(5),
+                    rtype: ast::U8Type,
+                },
+                ast::Expression {
+                    expr: ast::AsmOperation(asm::Add(0x0, 0x1)),
+                    rtype: ast::U8Type,
+                },
+            ],
+            marker: marker,
+        }
+    );
+
+    let main_block = parser.parse_block(ast::FunctionBlock);
+    let main_id = parser.fn_index;
+    parser.register_function("main", ~[], main_block);
+
+    let num_vars = parser.var_index;
+    let num_markers = parser.marker_stack.last_marker;
+
+    println!("--------------|  AST  | --------------");
+
+    for (name, function) in parser.functions.iter() {
+        println!("FUNCTION: {}", name);
+        println!("{}", function);
+        println!("");
+    }
+
+    let functions: ~[trans::Function] = parser.functions.move_iter()
+            .map(|(_, function)| trans::trans_function(function)).collect();
+
+    println!("--------------| TRANS | --------------");
+
+    for function in functions.iter() {
+        println!("{}", function);
+        println!("");
+    }
+
+    println!("--------------|  ASM  | --------------");
+
+    asm::compile(functions, main_id, num_vars, num_markers)
 }
 
 impl Parser {
-    fn parse_block(&mut self, block_type: BlockType) -> trans::Block {
+    /// Gets the next token
+    /// # Return
+    /// Returns the next token
+    fn next(&self) -> lexer::Token {
+        self.code[self.pos].clone()
+    }
+
+    /// Checks the next token, stepping forward one token if correct and failing if it is incorrect
+    /// # Arguments
+    /// `token` - The correct token
+    fn check(&mut self, token: lexer::Token) {
+        if self.next() == token {
+            self.pos += 1;
+        }
+        else {
+            self.fail_expected(token);
+        }
+    }
+
+    /// Fail for an unexpected token
+    fn fail_unexpected_token(&mut self) -> ! {
+        fail!("Error: `{}` is not allowed here", self.next())
+    }
+
+    /// Fail for expected token not found
+    /// # Arguments
+    /// `token` - the expected token
+    fn fail_expected(&mut self, token: lexer::Token) -> ! {
+        fail!("Error: expected `{}` but found `{}`", token, self.next())
+    }
+
+    /// Fail for undefined identifier
+    fn fail_undefined(&mut self, name: &str) -> ! {
+        fail!("Error: `{}` is undefined", name)
+    }
+
+    fn register_variable(&mut self, name: &str) {
+        self.variables.insert(name.to_owned(), ast::Variable { id: self.var_index });
+        self.var_index += 1;
+    }
+
+    fn register_function(&mut self, name: &str, args: ~[ast::ReturnType], body: ast::Block) {
+        let mut call_vars = ~[];
+        for _ in args.iter() {
+            call_vars.push(self.var_index);
+            self.var_index += 1;
+        }
+
+        let function = ast::Function {
+            arg_types: args,
+            call_vars: call_vars,
+            body: body,
+            id: self.fn_index,
+        };
+        self.functions.insert(name.to_owned(), function);
+        self.fn_index += 1;
+    }
+
+    /// Parse a block. A block is defined by a { and a }
+    /// # Arguments
+    /// `block_type` - The type of block. Only LoopBlocks can call break
+    /// # Return
+    /// Returns the ast representation of the block
+    fn parse_block(&mut self, block_type: ast::BlockType) -> ast::Block {
+        self.marker_stack.add(block_type);
+
         let mut statements = ~[];
-        self.marker_stack.push(block_type);
-        self.marker_stack.push(block_type);
-        // Parse the block
-        match self.code[self.pos].clone() {
-            lexer::LeftBrace => {
-                self.pos += 1;
-                // Loop through all the statements in the block
-                loop {
-                    match self.code[self.pos].clone() {
-                        lexer::RightBrace => break,
-                        _ => statements.push(self.parse_statement()),
-                    }
-                }
-            },
-            xx => fail!("Error: expected `LeftBrace` but found `{:?}`", xx)
+
+        self.check(lexer::LeftBrace);
+
+        loop {
+            match self.parse_block_item() {
+                Statement(s) => statements.push(s),
+                Expression(e) => {
+                    statements.push(e);
+                    break;
+                },
+                BlockEnd => break,
+            }
         }
-        self.pos += 1;
-        // Get the block markers
-        let (_, end_id) = match self.marker_stack.pop() {
-            Some(marker) => marker,
-            None => fail!("Unexpected error")
-        };
-        let (_, start_id) = match self.marker_stack.pop() {
-            Some(marker) => marker,
-            None => fail!("Unexpected error")
-        };
-        trans::Block {
+
+        self.check(lexer::RightBrace);
+
+        ast::Block {
             statements: statements,
-            start_id: start_id,
-            end_id: end_id,
+            marker: self.marker_stack.pop(),
         }
     }
 
-    fn parse_statement(&mut self) -> trans::Statement {
-        match self.code[self.pos].clone() {
-            lexer::Let => self.parse_let(),
-            lexer::If => self.parse_if(),
-            lexer::For => fail!("ICE: Unimplemented"),
-            lexer::While => fail!("ICE: Unimplemented"),
-            lexer::Fn => fail!("ICE: Unimplemented"),
-            lexer::Loop => self.parse_loop(),
-            lexer::Break => self.parse_break(),
-            lexer::Ident(ref s) => self.parse_ident_statement(s),
-            xx => fail!("Unexpected token found: `{:?}`", xx)
+    fn parse_block_item(&mut self) -> BlockItem {
+        if self.next() == lexer::RightBrace {
+            return BlockEnd;
+        }
+
+        let expr = self.parse_expression();
+
+        if self.next() == lexer::StatementEnd {
+            self.pos += 1;
+            Statement(expr)
+        }
+        else {
+            Expression(expr)
         }
     }
 
-    fn parse_statement_end(&mut self) {
-        match self.code[self.pos].clone() {
-            lexer::StatementEnd => self.pos += 1,
-            xx => fail!("Error: expected `StatementEnd` but found `{:?}`", xx)
+    fn parse_expression(&mut self) -> ast::Expression {
+        match self.next() {
+            lexer::Ident(ref s) => self.parse_ident(s),
+            lexer::LitNum(n)    => self.parse_lit(n),
+            lexer::Let          => self.parse_let(),
+            lexer::If           => self.parse_if(),
+            lexer::For          => unimplemented!(),
+            lexer::While        => unimplemented!(),
+            lexer::Fn           => unimplemented!(),
+            lexer::Loop         => self.parse_loop(),
+            lexer::Break        => self.parse_break(),
+            _                   => self.fail_unexpected_token(),
         }
     }
 
-    fn parse_let(&mut self) -> trans::Statement {
+    fn parse_lit(&mut self, num: u16) -> ast::Expression {
         self.pos += 1;
+        ast::Expression {
+            expr: ast::LitNum(num as u8),
+            rtype: ast::U8Type,
+        }
+    }
+
+    fn parse_let(&mut self) -> ast::Expression {
+        self.pos += 1;
+
         // Determine the variables name
-        let var_name = match self.code[self.pos].clone() {
+        let var_name = match self.next() {
             lexer::Ident(ref s) => s.clone(),
-            xx => fail!("Error: expected `Ident` but found `{:?}`", xx)
+            _ => self.fail_expected(lexer::Ident(~"<Identifier>")),
         };
+
         // Check if variable is already defined
-        if SYSTEM_CALLS.iter().any(|&x| x == var_name) {
-            fail!("Error: `{}` is a system command");
+        if self.functions.contains_key(&var_name) {
+            fail!("Error: Shadowing is unsupported. (`{}` was already defined)", var_name);
         }
         if self.variables.contains_key(&var_name) {
             fail!("Error: Shadowing is unsupported. (`{}` was already defined)", var_name);
         }
-        // Add the variable to the variable list
-        self.variables.insert(var_name.clone(), self.var_index);
-        self.var_index += 1;
+
+        // Register the variable
+        self.register_variable(var_name);
         self.pos += 1;
+
         // Check if we are assigning to the variable
-        match self.code[self.pos].clone() {
-            lexer::Assignment => {
-                self.pos += 1;
-                // Parse the assignment
-                self.parse_assignment(self.var_index-1)
-            },
-            _ => {
-                self.parse_statement_end();
-                // Variable declaration without assignment is a NOP
-                trans::Nop
-            },
+        if self.next() == lexer::Assignment {
+            self.pos += 1;
+            self.parse_assignment(self.var_index-1)
+        }
+        else {
+            // Not assigning anything to the varible doesn't require us to do anything
+            ast::Expression {
+                expr: ast::Nop,
+                rtype: ast::UnitType,
+            }
         }
     }
 
-    fn parse_assignment(&mut self, var_id: VarId) -> trans::Statement {
-        // Parse the rhs expression
+    fn parse_assignment(&mut self, var_id: ast::VarId) -> ast::Expression {
         let expr = self.parse_expression();
-        self.parse_statement_end();
-        trans::Assignment(var_id, expr)
+        check_expr_type(&expr, ast::U8Type);
+        ast::Expression {
+            expr: ast::Assignment(var_id, ~expr.expr),
+            rtype: ast::UnitType,
+        }
     }
 
-    fn parse_if(&mut self) -> trans::Statement {
+    fn parse_if(&mut self) -> ast::Expression {
         self.pos += 1;
-        // Parse the condition
+
         let condition_expr = self.parse_expression();
-        // Parse the if block
-        let if_block = self.parse_block(IfBlock);
-        // Parse the else block
-        let else_block = match self.code[self.pos].clone() {
+        check_expr_type(&condition_expr, ast::BoolType);
+
+        let if_block = self.parse_block(ast::IfBlock);
+        let else_block = match self.next() {
             lexer::Else => {
                 self.pos += 1;
-                self.parse_block(IfBlock)
+                self.parse_block(ast::IfBlock)
             },
             _ => {
                 // Create a blank block if the else block was not specified
-                self.marker_stack.last_marker += 2;
-                trans::Block {
+                self.marker_stack.add(ast::IfBlock);
+                ast::Block {
                     statements: ~[],
-                    start_id: self.marker_stack.last_marker-2,
-                    end_id: self.marker_stack.last_marker-1,
+                    marker: self.marker_stack.pop(),
                 }
             }
         };
-        trans::If(condition_expr, if_block, else_block)
+        let return_type = if_block.return_type();
+
+        // Check that if block and else block return the same type
+        check_block_type(&else_block, return_type);
+
+        ast::Expression {
+            expr: ast::If(~condition_expr.expr, ~if_block, ~else_block),
+            rtype: return_type,
+        }
     }
 
-    fn parse_loop(&mut self) -> trans::Statement {
+    fn parse_loop(&mut self) -> ast::Expression {
         self.pos += 1;
-        let mut loop_block = self.parse_block(LoopBlock);
+
+        let mut loop_block = self.parse_block(ast::LoopBlock);
+
         // Add the jump back to the start of the loop
-        loop_block.statements.push(trans::Jump(loop_block.start_id));
-        trans::Loop(loop_block)
+        loop_block.statements.push(ast::Expression {
+            expr: ast::Jump(loop_block.marker.start),
+            rtype: ast::UnitType,
+        });
+
+        ast::Expression {
+            expr: ast::Loop(~loop_block),
+            rtype: ast::UnitType,
+        }
     }
 
-    fn parse_break(&mut self) -> trans::Statement {
-        let jump_id = match self.marker_stack.find_type(LoopBlock) {
+    fn parse_break(&mut self) -> ast::Expression {
+        let jump_marker = match self.marker_stack.find_type(ast::LoopBlock) {
             Some(id) => id,
-            None => fail!("Error: `Break` is not valid here.")
+            None     => self.fail_unexpected_token(),
         };
 
         self.pos += 1;
 
-        self.parse_statement_end();
-        trans::Jump(jump_id)
-    }
-
-    fn parse_expression(&mut self) -> trans::Expression {
-        let mut current_expr = None;
-        loop {
-            current_expr = match self.code[self.pos].clone() {
-                lexer::Ident(ref s) => {
-                    Some(trans::Variable(self.get_variable(s)))
-                },
-                lexer::LitNum(n) => {
-                    self.pos += 1;
-                    Some(trans::LitNum(n as u8))
-                },
-                lexer::Plus => Some(self.parse_operator(current_expr, trans::Plus)),
-                lexer::Minus => Some(self.parse_operator(current_expr, trans::Minus)),
-                _ => break,
-            };
-        }
-        // Return the expression if there was one
-        match current_expr {
-            Some(expr) => expr,
-            None => fail!("Error: expected expression")
+        ast::Expression {
+            expr: ast::Jump(jump_marker.end),
+            rtype: ast::UnitType,
         }
     }
 
-    fn parse_operator(&mut self,
-            lhs: Option<trans::Expression>,
-            operator: trans::Operator) -> trans::Expression {
-        // Check that there is a valid lhs expression
-        let lhs = match lhs {
-            Some(expr) => expr,
-            None => fail!("Error: invalid LHS operand"),
-        };
-        self.pos += 1;
-        // Parse the rhs expression
-        let rhs = self.parse_expression();
-        trans::OperatorExpr(~rhs, operator, ~lhs)
-    }
-
-    fn parse_ident_statement(&mut self, name: &~str) -> trans::Statement {
-        // Check if the identifier was a system call
-        match SYSTEM_CALLS.iter().find(|& &x| x == *name) {
-            Some(&n) => {
-                self.pos += 1;
-                return trans::CallSys(match n {
-                    "__clear"     => self.parse_syscall_clear(),
-                    "__draw_pos"  => self.parse_syscall_draw_pos(),
-                    "__set_addr"  => fail!("Unimplemented"),
-                    "__draw"      => self.parse_syscall_draw(),
-                    "__random"    => fail!("Unimplemented"),
-                    "__set_delay" => fail!("Unimplemented"),
-                    "__get_font"  => self.parse_syscall_get_font(),
-                    "__key_wait"  => self.parse_syscall_key_wait(),
-
-                    _ => fail!("Unreachable")
-                });
-            },
-            None => {}
+    fn parse_ident(&mut self, name: &~str) -> ast::Expression {
+        match self.try_parse_function(name) {
+            Some(expr) => return expr,
+            None => {},
         }
 
-        // Check if the identifier is a variable
         match self.variables.find(name) {
-            Some(&var_id) => {
+            Some(&var) => {
                 self.pos += 1;
-                match self.code[self.pos].clone() {
-                    // If the identifier was a variable, then there should be an assignment
-                    lexer::Assignment => {
-                        self.pos += 1;
-                        return self.parse_assignment(var_id);
-                    },
-                    xx => fail!("Error: expected `Assignment` but found `{:?}`", xx)
+                if self.next() == lexer::Assignment {
+                    self.pos += 1;
+                    return self.parse_assignment(var.id);
+                }
+                else {
+                    return ast::Expression {
+                        expr: ast::Variable(var.id),
+                        rtype: ast::U8Type,
+                    };
                 }
             },
-            None => {}
+            None => {},
         }
 
-        fail!("Error: `{}` is undefined", *name);
+        // The identifier is not defined anywhere so fail
+        self.fail_undefined(*name);
     }
 
-    fn parse_syscall_clear(&mut self) -> trans::SysCall {
-        if self.code[self.pos].clone() != lexer::LeftParen {
-            fail!("Expected `LeftParen` but found {:?}", self.code[self.pos]);
+    fn try_parse_function(&mut self, name: &~str) -> Option<ast::Expression> {
+        if self.functions.find(name).is_none() {
+            return None;
         }
-        self.pos += 1;
-        if self.code[self.pos].clone() != lexer::RightParen {
-            fail!("Expected `RightParen` but found {:?}", self.code[self.pos]);
-        }
-        self.pos += 1;
-        if self.code[self.pos].clone() != lexer::StatementEnd {
-            fail!("Expected `StatementEnd` but found {:?}", self.code[self.pos]);
-        }
-        self.pos += 1;
-        trans::Clear
-    }
 
-    fn parse_syscall_draw_pos(&mut self) -> trans::SysCall {
-        if self.code[self.pos].clone() != lexer::LeftParen {
-            fail!("Expected `LeftParen` but found `{:?}`", self.code[self.pos]);
-        }
         self.pos += 1;
-        let x_expr = self.parse_expression();
-        if self.code[self.pos].clone() != lexer::Comma {
-            fail!("Expected `Comma` but found `{:?}`", self.code[self.pos]);
-        }
-        self.pos += 1;
-        let y_expr = self.parse_expression();
-        if self.code[self.pos].clone() != lexer::RightParen {
-            fail!("Expected `RightParen` but found `{:?}`", self.code[self.pos]);
-        }
-        self.pos += 1;
-        self.parse_statement_end();
-        trans::DrawPos(x_expr, y_expr)
-    }
 
-    fn parse_syscall_draw(&mut self) -> trans::SysCall {
-        if self.code[self.pos].clone() != lexer::LeftParen {
-            fail!("Expected `LeftParen` but found {:?}", self.code[self.pos]);
-        }
-        self.pos += 1;
-        let command = match self.code[self.pos].clone() {
-            lexer::LitNum(n) => {
-                assert!(n < 0x10);
-                trans::Draw(n as u8)
-            },
-            xx => fail!("Expected `LitNum` but found `{:?}`", xx)
+        let input_args = self.parse_function_args();
+
+        let function = match self.functions.find(name) {
+            Some(function) => function,
+            None => unreachable!(),
         };
-        self.pos += 1;
-        if self.code[self.pos].clone() != lexer::RightParen {
-            fail!("Expected `RightParen` but found {:?}", self.code[self.pos]);
+
+        // Check for the correct number of arguments
+        if input_args.len() != function.arg_types.len() {
+            fail!("Error: Incorrect number of arguments (expected `{}` but found `{}`)",
+                    function.arg_types.len(), input_args.len());
         }
-        self.pos += 1;
-        self.parse_statement_end();
-        command
+
+        // Check for correct return types
+        for (in_arg, out_arg) in input_args.iter().zip(function.arg_types.iter()) {
+            if in_arg.rtype != *out_arg {
+                fail!("Error: Incorrect argument type (expected `{}` but found `{}`)",
+                    in_arg.rtype, *out_arg);
+            }
+        }
+
+        Some(ast::Expression {
+            expr: ast::Call(function.id, function.call_vars.clone(), input_args),
+            rtype: function.body.return_type(),
+        })
     }
 
-    fn parse_syscall_get_font(&mut self) -> trans::SysCall {
-        if self.code[self.pos].clone() != lexer::LeftParen {
-            fail!("Expected `LeftParen` but found {:?}", self.code[self.pos]);
-        }
-        self.pos += 1;
-        let expr = self.parse_expression();
-        if self.code[self.pos].clone() != lexer::RightParen {
-            fail!("Expected `RightParen` but found {:?}", self.code[self.pos]);
-        }
-        self.pos += 1;
-        self.parse_statement_end();
-        trans::GetFont(expr)
-    }
+    fn parse_function_args(&mut self) -> ~[ast::Expression] {
+        self.check(lexer::LeftParen);
 
-    fn parse_syscall_key_wait(&mut self) -> trans::SysCall {
-        if self.code[self.pos].clone() != lexer::LeftParen {
-            fail!("Expected `LeftParen` but found {:?}", self.code[self.pos]);
+        // Check for no function args
+        if self.next() == lexer::RightParen {
+            self.pos += 1;
+            return ~[];
         }
-        self.pos += 1;
-        let expr = self.parse_expression();
-        if self.code[self.pos].clone() != lexer::RightParen {
-            fail!("Expected `RightParen` but found {:?}", self.code[self.pos]);
-        }
-        self.pos += 1;
-        self.parse_statement_end();
-        trans::KeyWait(expr)
-    }
 
-    /// Returns the id of a variable name
-    fn get_variable(&mut self, var_name: &~str) -> VarId {
-        let var_id = match self.variables.find(var_name) {
-            Some(id) => id,
-            None => fail!("Error: `{}` is undefined", *var_name)
-        };
-        self.pos += 1;
-        *var_id
+        let mut args = ~[];
+        loop {
+            args.push(self.parse_expression());
+            if self.next() != lexer::Comma {
+                break;
+            }
+            self.pos += 1;
+        }
+        self.check(lexer::RightParen);
+
+        args
     }
 }
