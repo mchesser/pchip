@@ -20,7 +20,7 @@ fn main() {
     let code = parser::parse(input);
     let mut output = File::create(&Path::new("program.ch8"));
 
-    match output.write(code) {
+    match output.write(code.as_slice()) {
         Ok(_)    => {},
         Err(err) => println!("Failed to write to file: {:?}", err)
     }

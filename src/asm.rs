@@ -2,7 +2,7 @@
 /// Description: Convert to bytes
 ///
 
-use std::vec;
+use std::vec::Vec;
 use parser::trans;
 
 static BASE_ADDRESS: u16 = 0x200;
@@ -52,34 +52,34 @@ pub enum Operation {
 #[deriving(Clone, Show)]
 enum FunctionAddress {
     FnAddress(u16),
-    Inline(~[trans::Operation]),
+    Inline(Vec<trans::Operation>),
 }
 
-pub fn compile(mut functions: ~[trans::Function], main_id: uint, num_vars: uint,
-        num_markers: uint) -> ~[u8] {
+pub fn compile(mut functions: Vec<trans::Function>, main_id: uint, num_vars: uint,
+        num_markers: uint) -> Vec<u8> {
 
     functions.sort_by(|a, b| a.id.cmp(&b.id));
     let mut current_address = BASE_ADDRESS;
 
-    let mut vars = vec::from_elem(num_vars, 0u16);
-    let mut funcs = vec::from_elem(functions.len(), FnAddress(0));
-    let mut markers = vec::from_elem(num_markers, 0u16);
+    let mut vars = Vec::from_elem(num_vars, 0u16);
+    let mut funcs = Vec::from_elem(functions.len(), FnAddress(0));
+    let mut markers = Vec::from_elem(num_markers, 0u16);
 
     // Add the jump to the main function
-    let mut actual_ops = ~[trans::UnknownAddr(Jump(0), trans::FunctionAddress(main_id))];
+    let mut actual_ops = vec![trans::UnknownAddr(Jump(0), trans::FunctionAddress(main_id))];
     current_address += 2;
 
     for function in functions.move_iter() {
         if function.inline {
             let id = function.id;
-            funcs[id] = Inline(function.code);
+            *funcs.get_mut(id) = Inline(function.code);
         }
         else {
-            funcs[function.id] = FnAddress(current_address);
+            *funcs.get_mut(function.id) = FnAddress(current_address);
             for operation in function.code.move_iter() {
                 match operation {
                     trans::Marker(id) => {
-                        markers[id] = current_address;
+                        *markers.get_mut(id) = current_address;
                     },
                     actual_op => {
                         actual_ops.push(actual_op);
@@ -99,19 +99,19 @@ pub fn compile(mut functions: ~[trans::Function], main_id: uint, num_vars: uint,
         current_address += 2;
     }
 
-    let opcodes: ~[u16] = actual_ops.move_iter().map(|operation| {
+    let opcodes: Vec<u16> = actual_ops.move_iter().map(|operation| {
         match operation {
             trans::RawOp(op) => op,
             trans::UnknownAddr(op, addr) => {
                 let raw_addr = match addr {
-                    trans::VariableAddress(id) => vars[id],
+                    trans::VariableAddress(id) => *vars.get(id),
                     trans::FunctionAddress(id) => {
-                        match funcs[id] {
-                            FnAddress(addr) => addr,
-                            Inline(_) => fail!("ICE: Call to inline function found"),
+                        match funcs.get(id) {
+                            &FnAddress(addr) => addr,
+                            &Inline(_) => fail!("ICE: Call to inline function found"),
                         }
                     },
-                    trans::MarkerAddress(id)   => markers[id],
+                    trans::MarkerAddress(id)   => *markers.get(id),
                     trans::RawAddress(address) => address,
                 };
                 match op {
@@ -126,7 +126,7 @@ pub fn compile(mut functions: ~[trans::Function], main_id: uint, num_vars: uint,
         }
     }).map(|operation| to_opcode(operation)).collect();
 
-    let mut bytes = ~[];
+    let mut bytes = Vec::with_capacity(2 * opcodes.len());
     for &opcode in opcodes.iter() {
         bytes.push((opcode >> 8) as u8);
         bytes.push(opcode as u8);

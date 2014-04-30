@@ -8,14 +8,14 @@ mod trans;
 mod asm;
 
 struct MarkerStack {
-    markers: ~[(ast::BlockType, ast::Marker)],
+    markers: Vec<(ast::BlockType, ast::Marker)>,
     last_marker: ast::MarkerId,
 }
 
 impl MarkerStack {
     fn new() -> MarkerStack {
         MarkerStack {
-            markers: ~[],
+            markers: Vec::new(),
             last_marker: 0
         }
     }
@@ -49,7 +49,7 @@ impl MarkerStack {
 
     /// Find the top most marker of the specified type
     fn find_type(&mut self, block_type: ast::BlockType) -> Option<ast::Marker> {
-        self.markers.rev_iter().find(|& &(btype, _)| btype == block_type).map(|&(_, id)| id)
+        self.markers.iter().rev().find(|&&(btype, _)| btype == block_type).map(|&(_, id)| id)
     }
 }
 
@@ -77,7 +77,7 @@ struct Parser {
     pos: uint,
 }
 
-pub fn parse(source_code: &str) -> ~[u8] {
+pub fn parse(source_code: &str) -> Vec<u8> {
     let mut parser = Parser {
         variables: HashMap::new(),
         var_index: 0,
@@ -103,9 +103,9 @@ pub fn parse(source_code: &str) -> ~[u8] {
     // clear()
     let marker = parser.marker_stack.get();
     parser.register_function(
-        "clear", ~[],
+        "clear", vec![],
         ast::Block {
-            statements: ~[
+            statements: vec![
                 ast::Expression {
                     expr: ast::AsmOperation(asm::Clear),
                     rtype: ast::UnitType
@@ -118,9 +118,9 @@ pub fn parse(source_code: &str) -> ~[u8] {
     // draw_pos(x, y)
     let marker = parser.marker_stack.get();
     parser.register_function(
-        "draw_pos", ~[ast::U8Type, ast::U8Type],
+        "draw_pos", vec![ast::U8Type, ast::U8Type],
         ast::Block {
-            statements: ~[
+            statements: vec![
                 ast::Expression {
                     expr: ast::Variable(0),
                     rtype: ast::U8Type,
@@ -145,9 +145,9 @@ pub fn parse(source_code: &str) -> ~[u8] {
     // draw5(x, y, glyph_address)
     let marker = parser.marker_stack.get();
     parser.register_function(
-        "draw5", ~[ast::AddressType],
+        "draw5", vec![ast::AddressType],
         ast::Block {
-            statements: ~[
+            statements: vec![
                 ast::Expression {
                     expr: ast::AsmOperation(asm::Draw(0xD, 0xE, 5)),
                     rtype: ast::UnitType,
@@ -160,9 +160,9 @@ pub fn parse(source_code: &str) -> ~[u8] {
     // get_font(char_code)
     let marker = parser.marker_stack.get();
     parser.register_function(
-        "get_font", ~[ast::U8Type],
+        "get_font", vec![ast::U8Type],
         ast::Block {
-            statements: ~[
+            statements: vec![
                 ast::Expression {
                     expr: ast::Variable(3),
                     rtype: ast::U8Type,
@@ -179,9 +179,9 @@ pub fn parse(source_code: &str) -> ~[u8] {
     // key_wait()
     let marker = parser.marker_stack.get();
     parser.register_function(
-        "key_wait", ~[],
+        "key_wait", vec![],
         ast::Block {
-            statements: ~[
+            statements: vec![
                 ast::Expression {
                     expr: ast::AsmOperation(asm::KeyWait(0x0)),
                     rtype: ast::U8Type,
@@ -194,9 +194,9 @@ pub fn parse(source_code: &str) -> ~[u8] {
     // plus(a, b)
     let marker = parser.marker_stack.get();
     parser.register_function(
-        "plus", ~[ast::U8Type, ast::U8Type],
+        "plus", vec![ast::U8Type, ast::U8Type],
         ast::Block {
-            statements: ~[
+            statements: vec![
                 ast::Expression {
                     expr: ast::Variable(4),
                     rtype: ast::U8Type,
@@ -218,9 +218,36 @@ pub fn parse(source_code: &str) -> ~[u8] {
         }
     );
 
+    // minus(a, b)
+    let marker = parser.marker_stack.get();
+    parser.register_function(
+        "minus", vec![ast::U8Type, ast::U8Type],
+        ast::Block {
+            statements: vec![
+                ast::Expression {
+                    expr: ast::Variable(6),
+                    rtype: ast::U8Type,
+                },
+                ast::Expression {
+                    expr: ast::AsmOperation(asm::Set(0x1, 0x0)),
+                    rtype: ast::UnitType,
+                },
+                ast::Expression {
+                    expr: ast::Variable(7),
+                    rtype: ast::U8Type,
+                },
+                ast::Expression {
+                    expr: ast::AsmOperation(asm::Sub(0x0, 0x1)),
+                    rtype: ast::U8Type,
+                },
+            ],
+            marker: marker,
+        }
+    );
+
     let main_block = parser.parse_block(ast::FunctionBlock);
     let main_id = parser.fn_index;
-    parser.register_function("main", ~[], main_block);
+    parser.register_function("main", vec![], main_block);
 
     let num_vars = parser.var_index;
     let num_markers = parser.marker_stack.last_marker;
@@ -233,7 +260,7 @@ pub fn parse(source_code: &str) -> ~[u8] {
         println!("");
     }
 
-    let functions: ~[trans::Function] = parser.functions.move_iter()
+    let functions: Vec<trans::Function> = parser.functions.move_iter()
             .map(|(_, function)| trans::trans_function(function)).collect();
 
     println!("--------------| TRANS | --------------");
@@ -290,8 +317,8 @@ impl Parser {
         self.var_index += 1;
     }
 
-    fn register_function(&mut self, name: &str, args: ~[ast::ReturnType], body: ast::Block) {
-        let mut call_vars = ~[];
+    fn register_function(&mut self, name: &str, args: Vec<ast::ReturnType>, body: ast::Block) {
+        let mut call_vars = Vec::new();
         for _ in args.iter() {
             call_vars.push(self.var_index);
             self.var_index += 1;
@@ -315,7 +342,7 @@ impl Parser {
     fn parse_block(&mut self, block_type: ast::BlockType) -> ast::Block {
         self.marker_stack.add(block_type);
 
-        let mut statements = ~[];
+        let mut statements = Vec::new();
 
         self.check(lexer::LeftBrace);
 
@@ -437,7 +464,7 @@ impl Parser {
                 // Create a blank block if the else block was not specified
                 self.marker_stack.add(ast::IfBlock);
                 ast::Block {
-                    statements: ~[],
+                    statements: vec![],
                     marker: self.marker_stack.pop(),
                 }
             }
@@ -545,16 +572,16 @@ impl Parser {
         })
     }
 
-    fn parse_function_args(&mut self) -> ~[ast::Expression] {
+    fn parse_function_args(&mut self) -> Vec<ast::Expression> {
         self.check(lexer::LeftParen);
 
         // Check for no function args
         if self.next() == lexer::RightParen {
             self.pos += 1;
-            return ~[];
+            return vec![];
         }
 
-        let mut args = ~[];
+        let mut args = Vec::new();
         loop {
             args.push(self.parse_expression());
             if self.next() != lexer::Comma {

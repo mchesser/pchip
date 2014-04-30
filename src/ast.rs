@@ -6,8 +6,8 @@ pub type VarId = uint;
 
 #[deriving(Show)]
 pub struct Marker {
-    start: MarkerId,
-    end: MarkerId,
+    pub start: MarkerId,
+    pub end: MarkerId,
 }
 
 #[deriving(Eq)]
@@ -27,8 +27,8 @@ pub enum ReturnType {
 
 #[deriving(Show)]
 pub struct Block {
-    statements: ~[Expression],
-    marker: Marker,
+    pub statements: Vec<Expression>,
+    pub marker: Marker,
 }
 
 impl Block {
@@ -42,8 +42,8 @@ impl Block {
 
 #[deriving(Show)]
 pub struct Expression {
-    expr: Expr,
-    rtype: ReturnType,
+    pub expr: Expr,
+    pub rtype: ReturnType,
 }
 
 #[deriving(Show)]
@@ -51,7 +51,7 @@ pub enum Expr {
     If(~Expr, ~Block, ~Block),
     Loop(~Block),
     Assignment(VarId, ~Expr),
-    Call(FnId, ~[VarId], ~[Expression]),
+    Call(FnId, Vec<VarId>, Vec<Expression>),
     AsmOperation(asm::Operation),
     Jump(MarkerId),
     LitNum(u8),
@@ -62,12 +62,12 @@ pub enum Expr {
 
 #[deriving(Show)]
 pub struct Function {
-    arg_types: ~[ReturnType],
-    call_vars: ~[VarId],
-    body: Block,
-    id: FnId,
+    pub arg_types: Vec<ReturnType>,
+    pub call_vars: Vec<VarId>,
+    pub body: Block,
+    pub id: FnId,
 }
 
 pub struct Variable {
-    id: VarId,
+    pub id: VarId,
 }

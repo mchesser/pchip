@@ -30,7 +30,7 @@ pub enum Token {
 }
 
 pub struct Lexer<'a> {
-    priv remaining: &'a str,
+    remaining: &'a str,
 }
 
 impl<'a> Lexer<'a> {
