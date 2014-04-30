@@ -107,7 +107,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
             _ => {
                 token_end = scan_token(self.remaining);
                 let token_string = self.remaining.slice_to(token_end);
-                match token_string{
+                match token_string {
                     "let"   => Let,
                     "if"    => If,
                     "for"   => For,

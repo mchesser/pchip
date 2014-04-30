@@ -6,6 +6,7 @@ mod lexer;
 mod ast;
 mod trans;
 mod asm;
+mod chip8;
 
 struct MarkerStack {
     markers: Vec<(ast::BlockType, ast::Marker)>,
@@ -67,13 +68,13 @@ enum BlockItem {
     BlockEnd,
 }
 
-struct Parser {
+pub struct Parser {
     variables: HashMap<~str, ast::Variable>,
     var_index: ast::VarId,
     functions: HashMap<~str, ast::Function>,
     fn_index: ast::FnId,
     marker_stack: MarkerStack,
-    code: ~[lexer::Token],
+    code: Vec<lexer::Token>,
     pos: uint,
 }
 
@@ -93,157 +94,10 @@ pub fn parse(source_code: &str) -> Vec<u8> {
     println!("");
 
     println!("--------------| LEXER | --------------");
-    println!("{:?}", parser.code);
+    println!("{:?}", parser.code.as_slice());
     println!("");
-
-    //
-    // Register chip8 system functions
-    //
-
-    // clear()
-    let marker = parser.marker_stack.get();
-    parser.register_function(
-        "clear", vec![],
-        ast::Block {
-            statements: vec![
-                ast::Expression {
-                    expr: ast::AsmOperation(asm::Clear),
-                    rtype: ast::UnitType
-                },
-            ],
-            marker: marker,
-        }
-    );
-
-    // draw_pos(x, y)
-    let marker = parser.marker_stack.get();
-    parser.register_function(
-        "draw_pos", vec![ast::U8Type, ast::U8Type],
-        ast::Block {
-            statements: vec![
-                ast::Expression {
-                    expr: ast::Variable(0),
-                    rtype: ast::U8Type,
-                },
-                ast::Expression {
-                    expr: ast::AsmOperation(asm::Set(0xD, 0x0)),
-                    rtype: ast::UnitType,
-                },
-                ast::Expression {
-                    expr: ast::Variable(1),
-                    rtype: ast::U8Type,
-                },
-                ast::Expression {
-                    expr: ast::AsmOperation(asm::Set(0xE, 0x0)),
-                    rtype: ast::UnitType,
-                },
-            ],
-            marker: marker,
-        }
-    );
-
-    // draw5(x, y, glyph_address)
-    let marker = parser.marker_stack.get();
-    parser.register_function(
-        "draw5", vec![ast::AddressType],
-        ast::Block {
-            statements: vec![
-                ast::Expression {
-                    expr: ast::AsmOperation(asm::Draw(0xD, 0xE, 5)),
-                    rtype: ast::UnitType,
-                },
-            ],
-            marker: marker,
-        }
-    );
-
-    // get_font(char_code)
-    let marker = parser.marker_stack.get();
-    parser.register_function(
-        "get_font", vec![ast::U8Type],
-        ast::Block {
-            statements: vec![
-                ast::Expression {
-                    expr: ast::Variable(3),
-                    rtype: ast::U8Type,
-                },
-                ast::Expression {
-                    expr: ast::AsmOperation(asm::GetFont(0x0)),
-                    rtype: ast::AddressType,
-                },
-            ],
-            marker: marker,
-        }
-    );
-
-    // key_wait()
-    let marker = parser.marker_stack.get();
-    parser.register_function(
-        "key_wait", vec![],
-        ast::Block {
-            statements: vec![
-                ast::Expression {
-                    expr: ast::AsmOperation(asm::KeyWait(0x0)),
-                    rtype: ast::U8Type,
-                },
-            ],
-            marker: marker,
-        }
-    );
-
-    // plus(a, b)
-    let marker = parser.marker_stack.get();
-    parser.register_function(
-        "plus", vec![ast::U8Type, ast::U8Type],
-        ast::Block {
-            statements: vec![
-                ast::Expression {
-                    expr: ast::Variable(4),
-                    rtype: ast::U8Type,
-                },
-                ast::Expression {
-                    expr: ast::AsmOperation(asm::Set(0x1, 0x0)),
-                    rtype: ast::UnitType,
-                },
-                ast::Expression {
-                    expr: ast::Variable(5),
-                    rtype: ast::U8Type,
-                },
-                ast::Expression {
-                    expr: ast::AsmOperation(asm::Add(0x0, 0x1)),
-                    rtype: ast::U8Type,
-                },
-            ],
-            marker: marker,
-        }
-    );
-
-    // minus(a, b)
-    let marker = parser.marker_stack.get();
-    parser.register_function(
-        "minus", vec![ast::U8Type, ast::U8Type],
-        ast::Block {
-            statements: vec![
-                ast::Expression {
-                    expr: ast::Variable(6),
-                    rtype: ast::U8Type,
-                },
-                ast::Expression {
-                    expr: ast::AsmOperation(asm::Set(0x1, 0x0)),
-                    rtype: ast::UnitType,
-                },
-                ast::Expression {
-                    expr: ast::Variable(7),
-                    rtype: ast::U8Type,
-                },
-                ast::Expression {
-                    expr: ast::AsmOperation(asm::Sub(0x0, 0x1)),
-                    rtype: ast::U8Type,
-                },
-            ],
-            marker: marker,
-        }
-    );
+    
+    chip8::syscalls::register_system_calls(&mut parser);
 
     let main_block = parser.parse_block(ast::FunctionBlock);
     let main_id = parser.fn_index;
@@ -280,7 +134,7 @@ impl Parser {
     /// # Return
     /// Returns the next token
     fn next(&self) -> lexer::Token {
-        self.code[self.pos].clone()
+        self.code.get(self.pos).clone()
     }
 
     /// Checks the next token, stepping forward one token if correct and failing if it is incorrect
@@ -315,6 +169,10 @@ impl Parser {
     fn register_variable(&mut self, name: &str) {
         self.variables.insert(name.to_owned(), ast::Variable { id: self.var_index });
         self.var_index += 1;
+    }
+    
+    fn next_var(&self, ahead: uint) -> ast::VarId {
+        self.var_index + ahead
     }
 
     fn register_function(&mut self, name: &str, args: Vec<ast::ReturnType>, body: ast::Block) {
