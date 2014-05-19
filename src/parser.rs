@@ -268,7 +268,7 @@ impl Parser {
         // Determine the variables name
         let var_name = match self.next() {
             lexer::Ident(ref s) => s.clone(),
-            _ => self.fail_expected(lexer::Ident(~"<Identifier>")),
+            _ => self.fail_expected(lexer::Ident("<Identifier>".to_owned())),
         };
 
         // Check if variable is already defined
@@ -301,7 +301,7 @@ impl Parser {
         let expr = self.parse_expression();
         check_expr_type(&expr, ast::U8Type);
         ast::Expression {
-            expr: ast::Assignment(var_id, ~expr.expr),
+            expr: ast::Assignment(var_id, box expr.expr),
             rtype: ast::UnitType,
         }
     }
@@ -333,7 +333,7 @@ impl Parser {
         check_block_type(&else_block, return_type);
 
         ast::Expression {
-            expr: ast::If(~condition_expr.expr, ~if_block, ~else_block),
+            expr: ast::If(box condition_expr.expr, box if_block, box else_block),
             rtype: return_type,
         }
     }
@@ -350,7 +350,7 @@ impl Parser {
         });
 
         ast::Expression {
-            expr: ast::Loop(~loop_block),
+            expr: ast::Loop(box loop_block),
             rtype: ast::UnitType,
         }
     }

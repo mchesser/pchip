@@ -45,22 +45,22 @@ pub fn trans_block(block: ast::Block) -> Vec<Operation> {
 pub fn trans_expression(expr: ast::Expr) -> Vec<Operation> {
     let mut ops = Vec::new();
     match expr {
-        ast::If(~cond, ~then_block, ~else_block) => {
+        ast::If(cond, then_block, else_block) => {
             // If
-            ops.push_all(trans_expression(cond).as_slice());
+            ops.push_all(trans_expression(*cond).as_slice());
             ops.push(RawOp(asm::CompareV(0x0, 0x0)));
             ops.push(UnknownAddr(asm::Jump(0), MarkerAddress(else_block.marker.start)));
             // Then
-            ops.push_all(trans_block(then_block).as_slice());
+            ops.push_all(trans_block(*then_block).as_slice());
             ops.push(UnknownAddr(asm::Jump(0), MarkerAddress(else_block.marker.end)));
             // Else
-            ops.push_all(trans_block(else_block).as_slice());
+            ops.push_all(trans_block(*else_block).as_slice());
         },
-        ast::Loop(~block) => {
-            ops.push_all(trans_block(block).as_slice())
+        ast::Loop(block) => {
+            ops.push_all(trans_block(*block).as_slice())
         },
-        ast::Assignment(var, ~rhs) => {
-            ops.push_all(trans_expression(rhs).as_slice());
+        ast::Assignment(var, rhs) => {
+            ops.push_all(trans_expression(*rhs).as_slice());
             ops.push(UnknownAddr(asm::SetAddress(0), VariableAddress(var)));
             ops.push(RawOp(asm::Write(0x0)));
         },
@@ -68,7 +68,7 @@ pub fn trans_expression(expr: ast::Expr) -> Vec<Operation> {
             for (&store_id, arg) in call_vars.iter().zip(args.move_iter()) {
                 let rtype = arg.rtype;
                 if rtype != ast::AddressType {
-                    ops.push_all(trans_expression(ast::Assignment(store_id, ~arg.expr)).as_slice());
+                    ops.push_all(trans_expression(ast::Assignment(store_id, box arg.expr)).as_slice());
                 }
                 else {
                     // Need to special case address types because it is impossible to store them

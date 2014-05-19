@@ -124,7 +124,8 @@ pub fn compile(mut functions: Vec<trans::Function>, main_id: uint, num_vars: uin
             },
             _ => unreachable!()
         }
-    }).map(|operation| to_opcode(operation)).collect();
+    }).inspect(|operation| println!("{}", operation))
+    .map(|operation| to_opcode(operation)).collect();
 
     let mut bytes = Vec::with_capacity(2 * opcodes.len());
     for &opcode in opcodes.iter() {

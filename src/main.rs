@@ -9,7 +9,7 @@ fn main() {
         println!("Invalid usage");
         return;
     }
-    let mut file = match File::open(&Path::new(args[1])) {
+    let mut file = match File::open(&Path::new(args.get(1).clone())) {
         Ok(f)    => f,
         Err(err) => fail!("Error opening file: {}", err.desc)
     };

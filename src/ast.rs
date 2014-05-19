@@ -48,9 +48,9 @@ pub struct Expression {
 
 #[deriving(Show)]
 pub enum Expr {
-    If(~Expr, ~Block, ~Block),
-    Loop(~Block),
-    Assignment(VarId, ~Expr),
+    If(Box<Expr>, Box<Block>, Box<Block>),
+    Loop(Box<Block>),
+    Assignment(VarId, Box<Expr>),
     Call(FnId, Vec<VarId>, Vec<Expression>),
     AsmOperation(asm::Operation),
     Jump(MarkerId),
