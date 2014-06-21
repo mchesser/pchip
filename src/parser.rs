@@ -1,12 +1,10 @@
-extern crate collections;
+use std::collections::HashMap;
 
-use parser::collections::HashMap;
-
-mod lexer;
-mod ast;
-mod trans;
-mod asm;
-mod chip8;
+use lexer;
+use ast;
+use trans;
+use asm;
+use chip8;
 
 struct MarkerStack {
     markers: Vec<(ast::BlockType, ast::Marker)>,
@@ -22,7 +20,7 @@ impl MarkerStack {
     }
 
     /// Add a new marker to the marker stack
-    fn add(&mut self, block_type: ast::BlockType) {
+    pub fn add(&mut self, block_type: ast::BlockType) {
         let marker = ast::Marker {
             start: self.last_marker,
             end: self.last_marker + 1,
@@ -32,7 +30,7 @@ impl MarkerStack {
     }
 
     /// Get what the next marker would be
-    fn get(&mut self) -> ast::Marker {
+    pub fn get(&mut self) -> ast::Marker {
         self.last_marker += 2;
         ast::Marker {
             start: self.last_marker - 2,
@@ -69,11 +67,11 @@ enum BlockItem {
 }
 
 pub struct Parser {
-    variables: HashMap<~str, ast::Variable>,
+    variables: HashMap<String, ast::Variable>,
     var_index: ast::VarId,
-    functions: HashMap<~str, ast::Function>,
+    functions: HashMap<String, ast::Function>,
     fn_index: ast::FnId,
-    marker_stack: MarkerStack,
+    pub marker_stack: MarkerStack,
     code: Vec<lexer::Token>,
     pos: uint,
 }
@@ -94,7 +92,7 @@ pub fn parse(source_code: &str) -> Vec<u8> {
     println!("");
 
     println!("--------------| LEXER | --------------");
-    println!("{:?}", parser.code.as_slice());
+    println!("{}", parser.code.as_slice());
     println!("");
     
     chip8::syscalls::register_system_calls(&mut parser);
@@ -166,16 +164,16 @@ impl Parser {
         fail!("Error: `{}` is undefined", name)
     }
 
-    fn register_variable(&mut self, name: &str) {
-        self.variables.insert(name.to_owned(), ast::Variable { id: self.var_index });
+    fn register_variable(&mut self, name: String) {
+        self.variables.insert(name, ast::Variable { id: self.var_index });
         self.var_index += 1;
     }
     
-    fn next_var(&self, ahead: uint) -> ast::VarId {
+    pub fn next_var(&self, ahead: uint) -> ast::VarId {
         self.var_index + ahead
     }
 
-    fn register_function(&mut self, name: &str, args: Vec<ast::ReturnType>, body: ast::Block) {
+    pub fn register_function(&mut self, name: &str, args: Vec<ast::ReturnType>, body: ast::Block) {
         let mut call_vars = Vec::new();
         for _ in args.iter() {
             call_vars.push(self.var_index);
@@ -188,7 +186,7 @@ impl Parser {
             body: body,
             id: self.fn_index,
         };
-        self.functions.insert(name.to_owned(), function);
+        self.functions.insert(name.to_string(), function);
         self.fn_index += 1;
     }
 
@@ -268,7 +266,7 @@ impl Parser {
         // Determine the variables name
         let var_name = match self.next() {
             lexer::Ident(ref s) => s.clone(),
-            _ => self.fail_expected(lexer::Ident("<Identifier>".to_owned())),
+            _ => self.fail_expected(lexer::Ident("<Identifier>".to_string())),
         };
 
         // Check if variable is already defined
@@ -280,13 +278,14 @@ impl Parser {
         }
 
         // Register the variable
+        let var_index = self.var_index;
         self.register_variable(var_name);
         self.pos += 1;
 
         // Check if we are assigning to the variable
         if self.next() == lexer::Assignment {
             self.pos += 1;
-            self.parse_assignment(self.var_index-1)
+            self.parse_assignment(var_index)
         }
         else {
             // Not assigning anything to the varible doesn't require us to do anything
@@ -369,7 +368,7 @@ impl Parser {
         }
     }
 
-    fn parse_ident(&mut self, name: &~str) -> ast::Expression {
+    fn parse_ident(&mut self, name: &String) -> ast::Expression {
         match self.try_parse_function(name) {
             Some(expr) => return expr,
             None => {},
@@ -393,10 +392,10 @@ impl Parser {
         }
 
         // The identifier is not defined anywhere so fail
-        self.fail_undefined(*name);
+        self.fail_undefined(name.as_slice());
     }
 
-    fn try_parse_function(&mut self, name: &~str) -> Option<ast::Expression> {
+    fn try_parse_function(&mut self, name: &String) -> Option<ast::Expression> {
         if self.functions.find(name).is_none() {
             return None;
         }

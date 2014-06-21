@@ -1,4 +1,4 @@
-use parser::asm;
+use asm;
 
 pub type MarkerId = uint;
 pub type FnId = uint;
@@ -10,14 +10,14 @@ pub struct Marker {
     pub end: MarkerId,
 }
 
-#[deriving(Eq)]
+#[deriving(PartialEq)]
 pub enum BlockType {
     IfBlock,
     LoopBlock,
     FunctionBlock,
 }
 
-#[deriving(Eq, Clone, Show)]
+#[deriving(PartialEq, Clone, Show)]
 pub enum ReturnType {
     UnitType,
     U8Type,

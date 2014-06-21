@@ -3,7 +3,7 @@
 ///
 
 use std::vec::Vec;
-use parser::trans;
+use trans;
 
 static BASE_ADDRESS: u16 = 0x200;
 

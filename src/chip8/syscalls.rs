@@ -1,5 +1,5 @@
-use parser::ast;
-use parser::asm;
+use ast;
+use asm;
 use parser::Parser;
 
 /// Register Chip8 system calls with the parser

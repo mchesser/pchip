@@ -2,7 +2,7 @@
 /// Description: Parse the source code into tokens
 ///
 
-#[deriving(Eq, Clone, Show)]
+#[deriving(PartialEq, Clone, Show)]
 pub enum Token {
     LeftParen,
     RightParen,
@@ -19,7 +19,7 @@ pub enum Token {
     Break,
     Else,
     Fn,
-    Ident(~str),
+    Ident(String),
     Equal,
     Plus,
     PlusEq,
@@ -106,8 +106,8 @@ impl<'a> Iterator<Token> for Lexer<'a> {
             },
             _ => {
                 token_end = scan_token(self.remaining);
-                let token_string = self.remaining.slice_to(token_end);
-                match token_string {
+                let token_str = self.remaining.slice_to(token_end);
+                match token_str {
                     "let"   => Let,
                     "if"    => If,
                     "for"   => For,
@@ -118,7 +118,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                     "fn"    => Fn,
                     "true"  => LitNum(1),
                     "false" => LitNum(0),
-                    _       => Ident(token_string.to_owned())
+                    _       => Ident(token_str.to_string())
                 }
             }
         };

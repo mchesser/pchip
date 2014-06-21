@@ -2,6 +2,11 @@ use std::io::File;
 use std::os;
 
 mod parser;
+mod lexer;
+mod ast;
+mod trans;
+mod asm;
+mod chip8;
 
 fn main() {
     let args = os::args();
@@ -17,11 +22,11 @@ fn main() {
         Ok(input) => input,
         Err(err)  => fail!("Error reading file: {}", err.desc)
     };
-    let code = parser::parse(input);
+    let code = parser::parse(input.as_slice());
     let mut output = File::create(&Path::new("program.ch8"));
 
     match output.write(code.as_slice()) {
         Ok(_)    => {},
-        Err(err) => println!("Failed to write to file: {:?}", err)
+        Err(err) => println!("Failed to write to file: {}", err.desc)
     }
 }

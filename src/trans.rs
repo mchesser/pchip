@@ -1,5 +1,5 @@
-use parser::ast;
-use parser::asm;
+use ast;
+use asm;
 
 #[deriving(Show, Clone)]
 pub enum Address {
