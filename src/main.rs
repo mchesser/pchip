@@ -16,17 +16,17 @@ fn main() {
     }
     let mut file = match File::open(&Path::new(args.get(1).clone())) {
         Ok(f)    => f,
-        Err(err) => fail!("Error opening file: {}", err.desc)
+        Err(err) => fail!("Error opening file: {}", err)
     };
-    let input = match file.read_to_str() {
+    let input = match file.read_to_string() {
         Ok(input) => input,
-        Err(err)  => fail!("Error reading file: {}", err.desc)
+        Err(err)  => fail!("Error reading file: {}", err)
     };
     let code = parser::parse(input.as_slice());
     let mut output = File::create(&Path::new("program.ch8"));
 
     match output.write(code.as_slice()) {
         Ok(_)    => {},
-        Err(err) => println!("Failed to write to file: {}", err.desc)
+        Err(err) => println!("Failed to write to file: {}", err)
     }
 }
