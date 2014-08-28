@@ -1,73 +1,144 @@
-use asm;
-
-pub type MarkerId = uint;
-pub type FnId = uint;
-pub type VarId = uint;
+use error::InputSpan;
 
 #[deriving(Show)]
-pub struct Marker {
-    pub start: MarkerId,
-    pub end: MarkerId,
+pub struct Program {
+    pub items: Vec<Item>,
+    pub span: InputSpan,
 }
 
-#[deriving(PartialEq)]
-pub enum BlockType {
-    IfBlock,
-    LoopBlock,
-    FunctionBlock,
-}
-
-#[deriving(PartialEq, Clone, Show)]
-pub enum ReturnType {
-    UnitType,
-    U8Type,
-    AddressType,
-    BoolType,
-}
-
+// A top level item
 #[deriving(Show)]
-pub struct Block {
-    pub statements: Vec<Expression>,
-    pub marker: Marker,
+pub enum Item {
+    FunctionItem(FunctionDeclaration),
+    StructItem(StructDeclaration),
+    LetItem(LetStatement),
 }
 
-impl Block {
-    pub fn return_type(&self) -> ReturnType {
-        match self.statements.last() {
-            Some(ref expr) => expr.rtype,
-            None           => UnitType,
+impl Item {
+    pub fn span(&self) -> InputSpan {
+        match self {
+            &FunctionItem(ref x) => x.span.clone(),
+            &StructItem(ref x) => x.span.clone(),
+            &LetItem(ref x) => x.span.clone(),
         }
     }
 }
 
-#[deriving(Show)]
+#[deriving(Show, Hash, Clone, PartialEq, Eq)]
+pub enum PrimitiveType {
+    UnitType,
+    IntType,
+    BoolType,
+    // AnyType,
+    BottomType,
+}
+
+impl PrimitiveType {
+    pub fn size(&self) -> uint {
+        match *self {
+            UnitType => 0,
+            IntType => 4,
+            BoolType => 4,
+            BottomType => 0,
+        }
+    }
+}
+
+#[deriving(Show, Hash, Clone, PartialEq, Eq)]
+pub enum Type {
+    Primitive(PrimitiveType),
+    UserType(String),
+    VariableType(String),
+}
+
+#[deriving(Show, Clone)]
 pub struct Expression {
-    pub expr: Expr,
-    pub rtype: ReturnType,
+    pub expr: Box<Expr>,
+    pub rtype: Type,
 }
 
-#[deriving(Show)]
+#[deriving(Show, Clone)]
 pub enum Expr {
-    If(Box<Expr>, Box<Block>, Box<Block>),
-    Loop(Box<Block>),
-    Assignment(VarId, Box<Expr>),
-    Call(FnId, Vec<VarId>, Vec<Expression>),
-    AsmOperation(asm::Operation),
-    Jump(MarkerId),
-    LitNum(u8),
-    Variable(VarId),
-    //OperatorExpr(~Expr, Operator, ~Expr),
-    Nop,
+    // Control flow
+    IfExpr(IfStatement),
+    LoopExpr(LoopStatement),
+    CallExpr(FunctionCall),
+    Break,
+
+    // Variables
+    LetExpr(LetStatement),
+    AssignExpr(Assignment),
+    VariableExpr(String),
+    LitNumExpr(int),
+
+    // Other
+    AsmOpExpr(String),
+    EmptyExpr,
 }
 
-#[deriving(Show)]
-pub struct Function {
-    pub arg_types: Vec<ReturnType>,
-    pub call_vars: Vec<VarId>,
+#[deriving(Show, Clone)]
+pub struct Block {
+    pub statements: Vec<Expression>,
+    pub span: InputSpan,
+}
+
+impl Block {
+    pub fn rtype(&self) -> Type {
+        match self.statements.last() {
+            Some(stmt) => stmt.rtype.clone(),
+            None => Primitive(UnitType),
+        }
+    }
+}
+
+#[deriving(Show, Clone)]
+pub struct IfStatement {
+    pub condition: Expression,
     pub body: Block,
-    pub id: FnId,
+    pub else_block: Option<Block>,
+    pub span: InputSpan,
 }
 
-pub struct Variable {
-    pub id: VarId,
+#[deriving(Show, Clone)]
+pub struct LoopStatement {
+    pub body: Block,
+    pub span: InputSpan,
+}
+
+#[deriving(Show, Clone)]
+pub struct StructDeclaration {
+    pub name: String,
+    pub components: Vec<(String, PrimitiveType)>,
+    pub span: InputSpan,
+}
+
+#[deriving(Show, Clone)]
+pub struct FunctionDeclaration {
+    pub name: String,
+    pub params: Vec<(String, Type)>,
+    pub rtype: Type,
+    pub body: Block,
+    pub span: InputSpan,
+}
+
+#[deriving(Show, Clone)]
+pub struct FunctionCall {
+    pub name: String,
+    pub args: Vec<Expression>,
+    pub span: InputSpan,
+}
+
+#[deriving(Show, Clone)]
+pub struct LetStatement {
+    pub name: String,
+    pub var_type: Type,
+    pub assignment: Option<Assignment>,
+    pub span: InputSpan,
+}
+
+#[deriving(Show, Clone)]
+pub struct Assignment {
+    pub target: String,
+    pub expression: Expression,
+    pub span: InputSpan,
 }
