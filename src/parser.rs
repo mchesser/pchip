@@ -1,453 +1,434 @@
-use std::collections::HashMap;
-
-use lexer;
 use ast;
-use trans;
-use asm;
-use chip8;
+use error::{InputPos, InputSpan, Logger};
+use lexer;
+use lexer::{Lexer, Token};
 
-struct MarkerStack {
-    markers: Vec<(ast::BlockType, ast::Marker)>,
-    last_marker: ast::MarkerId,
+pub struct Parser<'a> {
+    tokens: Vec<lexer::Token>,
+    logger: Logger<'a>,
+    index: uint,
 }
 
-impl MarkerStack {
-    fn new() -> MarkerStack {
-        MarkerStack {
-            markers: Vec::new(),
-            last_marker: 0
-        }
-    }
-
-    /// Add a new marker to the marker stack
-    pub fn add(&mut self, block_type: ast::BlockType) {
-        let marker = ast::Marker {
-            start: self.last_marker,
-            end: self.last_marker + 1,
+impl<'a> Parser<'a> {
+    pub fn new(mut lexer: Lexer, logger: Logger<'a>) -> Parser<'a> {
+        let mut tokens: Vec<lexer::Token> = lexer.collect();
+        let end_token = lexer::Token {
+            value: lexer::Eof,
+            pos: tokens.last().map(|t| t.pos.clone()).unwrap_or(InputPos::start()),
         };
-        self.markers.push((block_type, marker));
-        self.last_marker += 2;
-    }
-
-    /// Get what the next marker would be
-    pub fn get(&mut self) -> ast::Marker {
-        self.last_marker += 2;
-        ast::Marker {
-            start: self.last_marker - 2,
-            end: self.last_marker - 1,
+        tokens.push(end_token);
+        Parser {
+            tokens: tokens,
+            logger: logger,
+            index: 0,
         }
     }
 
-    /// Pop the last marker added
-    fn pop(&mut self) -> ast::Marker {
-        match self.markers.pop() {
-            Some((_, marker)) => marker,
-            None => fail!("ICE: Marker stack was empty when pop was called"),
+    fn peek(&self) -> lexer::TokenValue {
+        self.tokens[self.index].value.clone()
+    }
+
+    fn next_token(&mut self) -> lexer::TokenValue {
+        self.index += 1;
+        self.tokens[self.index - 1].value.clone()
+    }
+
+    fn bump(&mut self) {
+        self.index += 1;
+    }
+
+    fn expect(&mut self, token: lexer::TokenValue) {
+        let span_start = self.current_pos();
+        let next = self.next_token();
+        if  next != token {
+            self.logger.report_error(format!("expected `{}` but found `{}`", token, next),
+                InputSpan::new(span_start, self.current_pos()));
+            self.fatal_error();
         }
     }
 
-    /// Find the top most marker of the specified type
-    fn find_type(&mut self, block_type: ast::BlockType) -> Option<ast::Marker> {
-        self.markers.iter().rev().find(|&&(btype, _)| btype == block_type).map(|&(_, id)| id)
-    }
-}
-
-fn check_expr_type(expr: &ast::Expression, rtype: ast::ReturnType) {
-    assert!(expr.rtype == rtype);
-}
-
-fn check_block_type(block: &ast::Block, rtype: ast::ReturnType) {
-    assert!(block.return_type() == rtype);
-}
-
-enum BlockItem {
-    Statement(ast::Expression),
-    Expression(ast::Expression),
-    BlockEnd,
-}
-
-pub struct Parser {
-    variables: HashMap<String, ast::Variable>,
-    var_index: ast::VarId,
-    functions: HashMap<String, ast::Function>,
-    fn_index: ast::FnId,
-    pub marker_stack: MarkerStack,
-    code: Vec<lexer::Token>,
-    pos: uint,
-}
-
-pub fn parse(source_code: &str) -> Vec<u8> {
-    let mut parser = Parser {
-        variables: HashMap::new(),
-        var_index: 0,
-        functions: HashMap::new(),
-        fn_index: 0,
-        marker_stack: MarkerStack::new(),
-        code: lexer::Lexer::new(source_code).collect(),
-        pos: 0,
-    };
-
-    println!("--------------| INPUT | --------------")
-    println!("{}", source_code);
-    println!("");
-
-    println!("--------------| LEXER | --------------");
-    println!("{}", parser.code.as_slice());
-    println!("");
-    
-    chip8::syscalls::register_system_calls(&mut parser);
-
-    let main_block = parser.parse_block(ast::FunctionBlock);
-    let main_id = parser.fn_index;
-    parser.register_function("main", vec![], main_block);
-
-    let num_vars = parser.var_index;
-    let num_markers = parser.marker_stack.last_marker;
-
-    println!("--------------|  AST  | --------------");
-
-    for (name, function) in parser.functions.iter() {
-        println!("FUNCTION: {}", name);
-        println!("{}", function);
-        println!("");
+    fn fatal_error(&self) -> ! {
+        fail!("");
     }
 
-    let functions: Vec<trans::Function> = parser.functions.move_iter()
-            .map(|(_, function)| trans::trans_function(function)).collect();
-
-    println!("--------------| TRANS | --------------");
-
-    for function in functions.iter() {
-        println!("{}", function);
-        println!("");
+    fn current_pos(&self) -> InputPos {
+        self.tokens[self.index].pos.clone()
     }
 
-    println!("--------------|  ASM  | --------------");
-
-    asm::compile(functions, main_id, num_vars, num_markers)
-}
-
-impl Parser {
-    /// Gets the next token
-    /// # Return
-    /// Returns the next token
-    fn next(&self) -> lexer::Token {
-        self.code.get(self.pos).clone()
-    }
-
-    /// Checks the next token, stepping forward one token if correct and failing if it is incorrect
-    /// # Arguments
-    /// `token` - The correct token
-    fn check(&mut self, token: lexer::Token) {
-        if self.next() == token {
-            self.pos += 1;
-        }
-        else {
-            self.fail_expected(token);
-        }
-    }
-
-    /// Fail for an unexpected token
-    fn fail_unexpected_token(&mut self) -> ! {
-        fail!("Error: `{}` is not allowed here", self.next())
-    }
-
-    /// Fail for expected token not found
-    /// # Arguments
-    /// `token` - the expected token
-    fn fail_expected(&mut self, token: lexer::Token) -> ! {
-        fail!("Error: expected `{}` but found `{}`", token, self.next())
-    }
-
-    /// Fail for undefined identifier
-    fn fail_undefined(&mut self, name: &str) -> ! {
-        fail!("Error: `{}` is undefined", name)
-    }
-
-    fn register_variable(&mut self, name: String) {
-        self.variables.insert(name, ast::Variable { id: self.var_index });
-        self.var_index += 1;
-    }
-    
-    pub fn next_var(&self, ahead: uint) -> ast::VarId {
-        self.var_index + ahead
-    }
-
-    pub fn register_function(&mut self, name: &str, args: Vec<ast::ReturnType>, body: ast::Block) {
-        let mut call_vars = Vec::new();
-        for _ in args.iter() {
-            call_vars.push(self.var_index);
-            self.var_index += 1;
-        }
-
-        let function = ast::Function {
-            arg_types: args,
-            call_vars: call_vars,
-            body: body,
-            id: self.fn_index,
-        };
-        self.functions.insert(name.to_string(), function);
-        self.fn_index += 1;
-    }
-
-    /// Parse a block. A block is defined by a { and a }
-    /// # Arguments
-    /// `block_type` - The type of block. Only LoopBlocks can call break
-    /// # Return
-    /// Returns the ast representation of the block
-    fn parse_block(&mut self, block_type: ast::BlockType) -> ast::Block {
-        self.marker_stack.add(block_type);
-
-        let mut statements = Vec::new();
-
-        self.check(lexer::LeftBrace);
+    pub fn parse(&mut self) -> ast::Program {
+        let mut items = vec![];
+        let span_start = self.current_pos();
+        let mut span_end = self.current_pos();
 
         loop {
-            match self.parse_block_item() {
-                Statement(s) => statements.push(s),
-                Expression(e) => {
-                    statements.push(e);
-                    break;
+            match self.try_parse_item() {
+                Some(item) => {
+                    span_end = item.span().end;
+                    items.push(item);
                 },
-                BlockEnd => break,
+                None => break,
+            }
+            println!("{}\n", items.last());
+        }
+
+        ast::Program {
+            items: items,
+            span: InputSpan::new(span_start, span_end),
+        }
+    }
+
+    fn try_parse_item(&mut self) -> Option<ast::Item> {
+        let span_start = self.current_pos();
+        let item = match self.next_token() {
+            lexer::Fn => ast::FunctionItem(self.parse_function()),
+            lexer::Struct => ast::StructItem(self.parse_struct_decl()),
+            lexer::Let => ast::LetItem(self.parse_let()),
+
+            lexer::Eof => return None,
+
+            invalid => {
+                self.logger.report_error(format!("expected `<Item>` but found, `{}`", invalid),
+                    InputSpan::new(span_start, self.current_pos()));
+                self.fatal_error();
+            },
+        };
+
+        Some(item)
+    }
+
+    fn parse_function(&mut self) -> ast::FunctionDeclaration {
+        let span_start = self.current_pos();
+
+        // Read function name
+        let name = self.parse_name();
+
+        // Read function args
+        self.expect(lexer::LeftParen);
+        let mut params = vec![];
+
+        // Handle case with 0 args
+        if self.peek() == lexer::RightParen {
+            self.bump();
+        }
+        // Otherwise parse all the parameters
+        else {
+            loop {
+                let param = self.parse_param();
+                params.push(param);
+
+                // Check if there is another argument
+                if self.peek() == lexer::Comma {
+                    self.bump()
+                }
+                // Otherwise check for closing paren as break
+                else {
+                    self.expect(lexer::RightParen);
+                    break;
+                }
             }
         }
 
-        self.check(lexer::RightBrace);
+        let type_span_start = self.current_pos();
+        // Read function return type
+        let rtype = match self.peek() {
+            lexer::LeftBrace => ast::Primitive(ast::UnitType),
 
-        ast::Block {
-            statements: statements,
-            marker: self.marker_stack.pop(),
+            lexer::RightArrow => {
+                self.bump();
+                let type_ = self.parse_type();
+                type_
+            },
+
+            invalid => {
+                self.logger.report_error(format!("expected `{{` or `->` but found `{}`", invalid),
+                    InputSpan::new(type_span_start, self.current_pos()));
+                self.fatal_error();
+            },
+        };
+
+        // Read function body
+        let body = self.parse_block();
+
+        let span_end = self.current_pos();
+        ast::FunctionDeclaration {
+            name: name,
+            params: params,
+            rtype: rtype,
+            body: body,
+            span: InputSpan::new(span_start, span_end),
         }
     }
 
-    fn parse_block_item(&mut self) -> BlockItem {
-        if self.next() == lexer::RightBrace {
-            return BlockEnd;
+    fn parse_struct_decl(&mut self) -> ast::StructDeclaration {
+        unimplemented!()
+    }
+
+    fn parse_let(&mut self) -> ast::LetStatement {
+        let span_start = self.current_pos();
+        let (name, opt_type) = self.parse_var_with_type();
+
+        let opt_assignment = match self.next_token() {
+            lexer::Assignment => Some(self.parse_assignment(name.clone())),
+            lexer::SemiColon => None,
+            invalid => {
+                self.logger.report_error(format!("expected `=` or `;` but found `{}`",
+                    invalid), InputSpan::new(span_start, self.current_pos()));
+                self.fatal_error();
+            }
+        };
+
+        // If the type wasn't specified for this variable then there needs
+        let type_ = match (&opt_type, &opt_assignment) {
+            (&Some(ref t), _) => t.clone(),
+            (&None, &Some(ref assignment)) => {
+                assignment.expression.rtype.clone()
+            },
+            (&None, &None) => {
+                self.logger.report_error(format!("could not determine type for variable `{}`",
+                    name), InputSpan::new(span_start, self.current_pos()));
+                self.fatal_error();
+            },
+        };
+
+        ast::LetStatement {
+            name: name,
+            var_type: type_,
+            assignment: opt_assignment,
+            span: InputSpan::new(span_start, self.current_pos()),
+        }
+    }
+
+    fn parse_name(&mut self) -> String {
+        let span_start = self.current_pos();
+        match self.next_token() {
+            lexer::Ident(name) => name.clone(),
+
+            invalid => {
+                self.logger.report_error(format!("expected `<identifer>` but found `{}`", invalid),
+                    InputSpan::new(span_start, self.current_pos()));
+                self.fatal_error();
+            },
+        }
+    }
+
+    fn parse_type(&mut self) -> ast::Type {
+        let span_start = self.current_pos();
+        match self.next_token() {
+            lexer::Ident(name) => ast::UserType(name.clone()),
+            lexer::Int => ast::Primitive(ast::IntType),
+            lexer::Bool => ast::Primitive(ast::BoolType),
+
+            invalid => {
+                self.logger.report_error(format!("expected `<Type>` but found `{}`", invalid),
+                    InputSpan::new(span_start, self.current_pos()));
+                self.fatal_error();
+            },
+        }
+    }
+
+    fn parse_param(&mut self) -> (String, ast::Type) {
+        let span_start = self.current_pos();
+        match self.parse_var_with_type() {
+            (name, Some(t)) => (name, t),
+            (name, None) => {
+                let span_end = self.current_pos();
+                self.logger.report_error(format!("expected `<Type>` for parameter `{}`", name),
+                    InputSpan::new(span_start, span_end));
+                self.fatal_error();
+            },
+        }
+    }
+
+    fn parse_var_with_type(&mut self) -> (String, Option<ast::Type>) {
+        let name = self.parse_name();
+
+        match self.peek() {
+            lexer::Colon => self.bump(),
+            _ => return (name, None),
         }
 
-        let expr = self.parse_expression();
+        let type_ = self.parse_type();
+        (name, Some(type_))
+    }
 
-        if self.next() == lexer::StatementEnd {
-            self.pos += 1;
-            Statement(expr)
+    fn parse_block(&mut self) -> ast::Block {
+        let span_start = self.current_pos();
+        self.expect(lexer::LeftBrace);
+
+        let mut statements = vec![];
+
+        loop {
+            if self.peek() == lexer::RightBrace {
+                self.bump();
+                break;
+            }
+            else {
+                let expression = self.parse_expression();
+                if self.peek() != lexer::RightBrace {
+                    self.expect(lexer::SemiColon);
+                    statements.push(expression);
+                }
+            }
         }
-        else {
-            Expression(expr)
+
+        println!("Parsed Function, next_token: {}", self.peek());
+
+        ast::Block {
+            statements: statements,
+            span: InputSpan::new(span_start, self.current_pos()),
         }
     }
 
     fn parse_expression(&mut self) -> ast::Expression {
-        match self.next() {
-            lexer::Ident(ref s) => self.parse_ident(s),
-            lexer::LitNum(n)    => self.parse_lit(n),
-            lexer::Let          => self.parse_let(),
-            lexer::If           => self.parse_if(),
-            lexer::For          => unimplemented!(),
-            lexer::While        => unimplemented!(),
-            lexer::Fn           => unimplemented!(),
-            lexer::Loop         => self.parse_loop(),
-            lexer::Break        => self.parse_break(),
-            _                   => self.fail_unexpected_token(),
+        let span_start = self.current_pos();
+
+        match self.next_token() {
+            lexer::Ident(name) => self.handle_ident(name.to_string()),
+            lexer::LitNum(value) => self.handle_num(value),
+            lexer::Let => {
+                ast::Expression {
+                    expr: box ast::LetExpr(self.parse_let()),
+                    rtype: ast::Primitive(ast::UnitType),
+                }
+            },
+            lexer::If => self.parse_if(),
+            lexer::For => unimplemented!(),
+            lexer::While => unimplemented!(),
+            lexer::Loop => self.parse_loop(),
+            lexer::Break => self.parse_break(),
+            invalid => {
+                let span_end = self.current_pos();
+                self.logger.report_error(format!("expected `<Expression>` but found `{}`", invalid),
+                    InputSpan::new(span_start, span_end));
+                self.fatal_error();
+            },
         }
     }
 
-    fn parse_lit(&mut self, num: u16) -> ast::Expression {
-        self.pos += 1;
-        ast::Expression {
-            expr: ast::LitNum(num as u8),
-            rtype: ast::U8Type,
-        }
-    }
+    fn handle_ident(&mut self, name: String) -> ast::Expression {
+        match self.peek() {
+            lexer::LeftParen => {
+                self.bump();
+                self.parse_call(name)
+            },
 
-    fn parse_let(&mut self) -> ast::Expression {
-        self.pos += 1;
+            lexer::Assignment => {
+                ast::Expression {
+                    expr: box ast::AssignExpr(self.parse_assignment(name)),
+                    rtype: ast::Primitive(ast::UnitType),
+                }
+            }
 
-        // Determine the variables name
-        let var_name = match self.next() {
-            lexer::Ident(ref s) => s.clone(),
-            _ => self.fail_expected(lexer::Ident("<Identifier>".to_string())),
-        };
+            lexer::Plus => unimplemented!(),
+            lexer::Minus => unimplemented!(),
+            lexer::PlusEq => unimplemented!(),
+            lexer::MinusEq => unimplemented!(),
 
-        // Check if variable is already defined
-        if self.functions.contains_key(&var_name) {
-            fail!("Error: Shadowing is unsupported. (`{}` was already defined)", var_name);
-        }
-        if self.variables.contains_key(&var_name) {
-            fail!("Error: Shadowing is unsupported. (`{}` was already defined)", var_name);
-        }
-
-        // Register the variable
-        let var_index = self.var_index;
-        self.register_variable(var_name);
-        self.pos += 1;
-
-        // Check if we are assigning to the variable
-        if self.next() == lexer::Assignment {
-            self.pos += 1;
-            self.parse_assignment(var_index)
-        }
-        else {
-            // Not assigning anything to the varible doesn't require us to do anything
-            ast::Expression {
-                expr: ast::Nop,
-                rtype: ast::UnitType,
+            _ => {
+                ast::Expression {
+                    expr: box ast::VariableExpr(name.clone()),
+                    rtype: ast::VariableType(name),
+                }
             }
         }
     }
 
-    fn parse_assignment(&mut self, var_id: ast::VarId) -> ast::Expression {
-        let expr = self.parse_expression();
-        check_expr_type(&expr, ast::U8Type);
+    fn parse_call(&mut self, name: String) -> ast::Expression {
+        let span_start = self.current_pos();
+        let mut args = vec![];
+        loop {
+            args.push(self.parse_expression());
+
+            // Check if there is another argument
+            if self.peek() == lexer::Comma {
+                self.bump()
+            }
+            // Otherwise check for closing paren as break
+            else {
+                self.expect(lexer::RightParen);
+                break;
+            }
+        }
+
+        let function_call = ast::FunctionCall {
+            name: name.clone(),
+            args: args,
+            span: InputSpan::new(span_start, self.current_pos()),
+        };
+
         ast::Expression {
-            expr: ast::Assignment(var_id, box expr.expr),
-            rtype: ast::UnitType,
+            expr: box ast::CallExpr(function_call),
+            rtype: ast::VariableType(name),
+        }
+    }
+
+    fn parse_assignment(&mut self, target: String) -> ast::Assignment {
+        let span_start = self.current_pos();
+        ast::Assignment {
+            target: target,
+            expression: self.parse_expression(),
+            span: InputSpan::new(span_start, self.current_pos()),
+        }
+    }
+
+    fn handle_num(&mut self, val: int) -> ast::Expression {
+        ast::Expression {
+            expr: box ast::LitNumExpr(val),
+            rtype: ast::Primitive(ast::IntType),
         }
     }
 
     fn parse_if(&mut self) -> ast::Expression {
-        self.pos += 1;
+        let span_start = self.current_pos();
 
-        let condition_expr = self.parse_expression();
-        check_expr_type(&condition_expr, ast::BoolType);
-
-        let if_block = self.parse_block(ast::IfBlock);
-        let else_block = match self.next() {
+        let condition = self.parse_expression();
+        let body = self.parse_block();
+        let else_block = match self.peek() {
             lexer::Else => {
-                self.pos += 1;
-                self.parse_block(ast::IfBlock)
-            },
-            _ => {
-                // Create a blank block if the else block was not specified
-                self.marker_stack.add(ast::IfBlock);
-                ast::Block {
-                    statements: vec![],
-                    marker: self.marker_stack.pop(),
+                self.bump();
+                if self.next_token() == lexer::If {
+                    fail!("FIXME: Handle else if statements");
                 }
-            }
-        };
-        let return_type = if_block.return_type();
 
-        // Check that if block and else block return the same type
-        check_block_type(&else_block, return_type);
+                Some(self.parse_block())
+            },
+            _ => None,
+        };
+
+        let if_statement = ast::IfStatement {
+            condition: condition,
+            body: body,
+            else_block: else_block,
+            span: InputSpan::new(span_start, self.current_pos()),
+        };
+
+        let rtype = if_statement.body.rtype();
 
         ast::Expression {
-            expr: ast::If(box condition_expr.expr, box if_block, box else_block),
-            rtype: return_type,
+            expr: box ast::IfExpr(if_statement),
+            rtype: rtype,
         }
     }
 
     fn parse_loop(&mut self) -> ast::Expression {
-        self.pos += 1;
+        let span_start = self.current_pos();
+        let body = self.parse_block();
 
-        let mut loop_block = self.parse_block(ast::LoopBlock);
-
-        // Add the jump back to the start of the loop
-        loop_block.statements.push(ast::Expression {
-            expr: ast::Jump(loop_block.marker.start),
-            rtype: ast::UnitType,
-        });
+        let loop_statement = ast::LoopStatement {
+            body: body,
+            span: InputSpan::new(span_start, self.current_pos()),
+        };
 
         ast::Expression {
-            expr: ast::Loop(box loop_block),
-            rtype: ast::UnitType,
+            expr: box ast::LoopExpr(loop_statement),
+            rtype: ast::Primitive(ast::UnitType),
         }
     }
 
     fn parse_break(&mut self) -> ast::Expression {
-        let jump_marker = match self.marker_stack.find_type(ast::LoopBlock) {
-            Some(id) => id,
-            None     => self.fail_unexpected_token(),
-        };
-
-        self.pos += 1;
-
         ast::Expression {
-            expr: ast::Jump(jump_marker.end),
-            rtype: ast::UnitType,
+            expr: box ast::Break,
+            rtype: ast::Primitive(ast::BottomType),
         }
-    }
-
-    fn parse_ident(&mut self, name: &String) -> ast::Expression {
-        match self.try_parse_function(name) {
-            Some(expr) => return expr,
-            None => {},
-        }
-
-        match self.variables.find(name) {
-            Some(&var) => {
-                self.pos += 1;
-                if self.next() == lexer::Assignment {
-                    self.pos += 1;
-                    return self.parse_assignment(var.id);
-                }
-                else {
-                    return ast::Expression {
-                        expr: ast::Variable(var.id),
-                        rtype: ast::U8Type,
-                    };
-                }
-            },
-            None => {},
-        }
-
-        // The identifier is not defined anywhere so fail
-        self.fail_undefined(name.as_slice());
-    }
-
-    fn try_parse_function(&mut self, name: &String) -> Option<ast::Expression> {
-        if self.functions.find(name).is_none() {
-            return None;
-        }
-
-        self.pos += 1;
-
-        let input_args = self.parse_function_args();
-
-        let function = match self.functions.find(name) {
-            Some(function) => function,
-            None => unreachable!(),
-        };
-
-        // Check for the correct number of arguments
-        if input_args.len() != function.arg_types.len() {
-            fail!("Error: Incorrect number of arguments (expected `{}` but found `{}`)",
-                    function.arg_types.len(), input_args.len());
-        }
-
-        // Check for correct return types
-        for (in_arg, out_arg) in input_args.iter().zip(function.arg_types.iter()) {
-            if in_arg.rtype != *out_arg {
-                fail!("Error: Incorrect argument type (expected `{}` but found `{}`)",
-                    in_arg.rtype, *out_arg);
-            }
-        }
-
-        Some(ast::Expression {
-            expr: ast::Call(function.id, function.call_vars.clone(), input_args),
-            rtype: function.body.return_type(),
-        })
-    }
-
-    fn parse_function_args(&mut self) -> Vec<ast::Expression> {
-        self.check(lexer::LeftParen);
-
-        // Check for no function args
-        if self.next() == lexer::RightParen {
-            self.pos += 1;
-            return vec![];
-        }
-
-        let mut args = Vec::new();
-        loop {
-            args.push(self.parse_expression());
-            if self.next() != lexer::Comma {
-                break;
-            }
-            self.pos += 1;
-        }
-        self.check(lexer::RightParen);
-
-        args
     }
 }
