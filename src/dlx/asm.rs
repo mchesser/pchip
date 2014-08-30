@@ -126,8 +126,8 @@ impl Instruction {
             Store16(s, i, j) => format!("sh    {}(r{}),r{}", s, i, j),
             Store32(s, i, j) => format!("sw    {}(r{}),r{}", s, i, j),
 
-            JumpIfZero(i, label)    => format!("beqz  {},{}", i, label),
-            JumpIfNotZero(i, label) => format!("bnez  {},{}", i, label),
+            JumpIfZero(i, label)    => format!("beqz  r{},{}", i, label),
+            JumpIfNotZero(i, label) => format!("bnez  r{},{}", i, label),
             Jump(label)             => format!("j     {}", label),
             JumpStore(label)        => format!("jal   {}", label),
             JumpStoreR(i)           => format!("jalr  r{}", i),
@@ -205,10 +205,7 @@ impl Instruction {
             },
             AllocateSpace(amount) => format!(".space  {}", amount),
 
-
             RawAsm(ref data) => data.clone(),
-
-            _ => unimplemented!(),
         }
     }
 }

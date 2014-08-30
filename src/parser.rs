@@ -7,6 +7,7 @@ pub struct Parser<'a> {
     tokens: Vec<lexer::Token>,
     logger: Logger<'a>,
     index: uint,
+    fake_semicolon: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -21,6 +22,7 @@ impl<'a> Parser<'a> {
             tokens: tokens,
             logger: logger,
             index: 0,
+            fake_semicolon: false,
         }
     }
 
@@ -40,7 +42,7 @@ impl<'a> Parser<'a> {
     fn expect(&mut self, token: lexer::TokenValue) {
         let span_start = self.current_pos();
         let next = self.next_token();
-        if  next != token {
+        if next != token {
             self.logger.report_error(format!("expected `{}` but found `{}`", token, next),
                 InputSpan::new(span_start, self.current_pos()));
             self.fatal_error();
@@ -256,7 +258,6 @@ impl<'a> Parser<'a> {
         self.expect(lexer::LeftBrace);
 
         let mut statements = vec![];
-
         loop {
             if self.peek() == lexer::RightBrace {
                 self.bump();
@@ -265,13 +266,17 @@ impl<'a> Parser<'a> {
             else {
                 let expression = self.parse_expression();
                 if self.peek() != lexer::RightBrace {
-                    self.expect(lexer::SemiColon);
+                    if !self.fake_semicolon {
+                        self.expect(lexer::SemiColon);
+                    }
+                    self.fake_semicolon = false;
+                    statements.push(expression);
+                }
+                else {
                     statements.push(expression);
                 }
             }
         }
-
-        println!("Parsed Function, next_token: {}", self.peek());
 
         ast::Block {
             statements: statements,
@@ -296,6 +301,8 @@ impl<'a> Parser<'a> {
             lexer::While => unimplemented!(),
             lexer::Loop => self.parse_loop(),
             lexer::Break => self.parse_break(),
+            lexer::Return => self.parse_return(),
+            lexer::Asm => self.parse_asm(),
             invalid => {
                 let span_end = self.current_pos();
                 self.logger.report_error(format!("expected `<Expression>` but found `{}`", invalid),
@@ -337,6 +344,11 @@ impl<'a> Parser<'a> {
         let span_start = self.current_pos();
         let mut args = vec![];
         loop {
+            if self.peek() == lexer::RightParen {
+                self.bump();
+                break;
+            }
+
             args.push(self.parse_expression());
 
             // Check if there is another argument
@@ -395,6 +407,11 @@ impl<'a> Parser<'a> {
             _ => None,
         };
 
+        // Insert an implicit semicolon if there wasn't one at the end of the if statement
+        if self.peek() != lexer::SemiColon {
+            self.fake_semicolon = true;
+        }
+
         let if_statement = ast::IfStatement {
             condition: condition,
             body: body,
@@ -429,6 +446,56 @@ impl<'a> Parser<'a> {
         ast::Expression {
             expr: box ast::Break,
             rtype: ast::Primitive(ast::BottomType),
+        }
+    }
+
+    fn parse_return(&mut self) -> ast::Expression {
+        let expression = self.parse_expression();
+        let rtype = expression.rtype.clone();
+        ast::Expression {
+            expr: box ast::Return(expression),
+            rtype: rtype,
+        }
+    }
+
+    fn parse_asm(&mut self) -> ast::Expression {
+        let span_start = self.current_pos();
+        self.expect(lexer::LeftBrace);
+
+        let mut code = String::new();
+        code.push_char('\n');
+        loop {
+            match self.next_token() {
+                lexer::LitString(ref string) => {
+                    code.push_str(string.as_slice());
+                    code.push_char('\n');
+                },
+                lexer::RightBrace => {
+                    break;
+                },
+                invalid => {
+                    self.logger.report_error(
+                        format!("expected `\"<string>\"` or `}}` but found, `{}`", invalid),
+                        InputSpan::new(span_start, self.current_pos()));
+                    self.fatal_error();
+                },
+            }
+
+            match self.next_token() {
+                lexer::RightBrace => break,
+                lexer::Comma => continue,
+                invalid => {
+                    self.logger.report_error(
+                        format!("expected `,` or `}}` but found, `{}`", invalid),
+                        InputSpan::new(span_start, self.current_pos()));
+                    self.fatal_error();
+                },
+            }
+        }
+
+        ast::Expression {
+            expr: box ast::AsmOpExpr(code),
+            rtype: ast::Primitive(ast::AnyType),
         }
     }
 }
