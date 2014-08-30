@@ -28,11 +28,13 @@ pub enum TokenValue {
     While,
     Loop,
     Break,
+    Return,
 
     If,
     Else,
     Struct,
     Fn,
+    Asm,
 
     Bool,
     Int,
@@ -41,6 +43,7 @@ pub enum TokenValue {
     True,
     False,
     LitNum(int),
+    LitString(String),
     Ident(String),
 }
 
@@ -170,22 +173,39 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                 }
             },
 
+            '"' => {
+                self.bump();
+                token_len = match self.remaining.find('"') {
+                    Some(offset) => offset,
+                    None => {
+                        fail!("Unclosed \" ");
+                    },
+                };
+                let result = LitString(self.remaining.slice_to(token_len).into_string());
+                token_len += 1;
+                result
+            },
+
             _ => {
                 token_len = scan_token(self.remaining);
                 let token_str = self.remaining.slice_to(token_len);
                 match token_str {
-                    "let"   => Let,
-                    "if"    => If,
-                    "for"   => For,
-                    "while" => While,
-                    "loop"  => Loop,
-                    "break" => Break,
-                    "else"  => Else,
-                    "fn"    => Fn,
-                    "true"  => True,
-                    "false" => False,
-                    "int"   => Int,
-                    _       => Ident(token_str.to_string())
+                    "let"    => Let,
+                    "if"     => If,
+                    "for"    => For,
+                    "while"  => While,
+                    "loop"   => Loop,
+                    "break"  => Break,
+                    "return" => Return,
+                    "else"   => Else,
+                    "asm"    => Asm,
+                    "fn"     => Fn,
+                    "struct" => Struct,
+                    "true"   => True,
+                    "false"  => False,
+                    "int"    => Int,
+                    "bool"   => Bool,
+                    _        => Ident(token_str.to_string())
                 }
             }
         };
@@ -206,7 +226,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
 /// Scans till the end of the token returning the index of the end of the token
 fn scan_token(string: &str) -> uint {
     static TOKEN_BOUNDS: &'static [char] = &[
-        ' ', '\t', '\n', '#', ':', ';', ',', '(', ')', '{', '}', '.', '=', '+', '-'
+        ' ', '\t', '\n', '#', ':', ';', ',', '(', ')', '{', '}', '.', '=', '+', '-', '"'
     ];
 
     match string.find(TOKEN_BOUNDS) {

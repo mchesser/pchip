@@ -205,10 +205,7 @@ impl Instruction {
             },
             AllocateSpace(amount) => format!(".space  {}", amount),
 
-
             RawAsm(ref data) => data.clone(),
-
-            _ => unimplemented!(),
         }
     }
 }

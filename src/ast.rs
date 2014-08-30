@@ -29,7 +29,7 @@ pub enum PrimitiveType {
     UnitType,
     IntType,
     BoolType,
-    // AnyType,
+    AnyType,
     BottomType,
 }
 
@@ -40,6 +40,7 @@ impl PrimitiveType {
             IntType => 4,
             BoolType => 4,
             BottomType => 0,
+            AnyType => fail!("ICE: Attempted to determine the size of AnyType"),
         }
     }
 }
@@ -64,6 +65,7 @@ pub enum Expr {
     LoopExpr(LoopStatement),
     CallExpr(FunctionCall),
     Break,
+    Return(Expression),
 
     // Variables
     LetExpr(LetStatement),

@@ -266,6 +266,11 @@ impl CodeData {
                     None => fail!("INVALID_BREAK_ERROR, TODO: Improve error message"),
                 }
             },
+            ast::Return(ref inner) => {
+                self.compile_expression(scope, inner);
+                let return_label = scope.end_label.clone();
+                self.instructions.push(asm::Jump(return_label));
+            },
             ast::LetExpr(ref inner) => self.compile_let(scope, inner),
             ast::AssignExpr(ref inner) => self.compile_assign(scope, inner),
             ast::VariableExpr(ref name) => {
