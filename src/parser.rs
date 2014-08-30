@@ -337,6 +337,11 @@ impl<'a> Parser<'a> {
         let span_start = self.current_pos();
         let mut args = vec![];
         loop {
+            if self.peek() == lexer::RightParen {
+                self.bump();
+                break;
+            }
+
             args.push(self.parse_expression());
 
             // Check if there is another argument
