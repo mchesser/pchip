@@ -95,8 +95,8 @@ impl<'a> Lexer<'a> {
                 // Match comments
                 '#' => {
                     let comment_line = self.pos.line;
-                    while self.pos.line == comment_line {
-                        self.bump()
+                    while self.pos.line == comment_line && self.remaining.len() > 0 {
+                        self.bump();
                     }
                 },
 
