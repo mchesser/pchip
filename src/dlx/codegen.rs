@@ -197,10 +197,10 @@ impl CodeData {
         self.instructions.push(asm::Label(label));
 
         // Store caller's frame pointer and set current frame pointer
-        self.instructions.push(asm::Store32(asm::Const(0), FRAME_POINTER, STACK_POINTER));
+        self.instructions.push(asm::Store32(asm::Const(0), STACK_POINTER, FRAME_POINTER));
         self.instructions.push(asm::AddSigned(FRAME_POINTER, STACK_POINTER, ZERO_REG));
 
-        // Store return location
+        // Store return location (this should be done by caller)
         self.instructions.push(asm::Store32(asm::Const(4), FRAME_POINTER, RETURN_REG));
 
         // Create a local scope for this function
@@ -239,13 +239,16 @@ impl CodeData {
         self.compile_block(&mut local, &scope.functions[fn_id].ast.body);
 
         // Now set the amount of stack space to allocate
+        let frame_size = local.next_offset as i16;
         *self.instructions.get_mut(reserve_stack_index) =
-            asm::AddSignedValue(STACK_POINTER, STACK_POINTER, local.next_offset as i16);
+            asm::AddSignedValue(STACK_POINTER, STACK_POINTER, frame_size);
 
         self.instructions.push(asm::Label(local.end_label.clone()));
 
         // Add function return
         self.instructions.push(asm::Load32(RETURN_REG, asm::Const(4), FRAME_POINTER));
+        self.instructions.push(asm::AddSigned(STACK_POINTER, FRAME_POINTER, ZERO_REG));
+        self.instructions.push(asm::Load32(FRAME_POINTER, asm::Const(0), STACK_POINTER));
         self.instructions.push(asm::JumpR(RETURN_REG));
     }
 
@@ -308,7 +311,7 @@ impl CodeData {
             None => else_label.clone(),
         };
 
-        self.instructions.push(asm::JumpIfNotZero(RESULT_REG, end_label.clone()));
+        self.instructions.push(asm::JumpIfZero(RESULT_REG, else_label.clone()));
 
         // Compile the then block
         self.compile_block(scope, &if_statement.body);
