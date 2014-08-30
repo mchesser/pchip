@@ -258,7 +258,6 @@ impl<'a> Parser<'a> {
         self.expect(lexer::LeftBrace);
 
         let mut statements = vec![];
-
         loop {
             if self.peek() == lexer::RightBrace {
                 self.bump();
@@ -271,6 +270,9 @@ impl<'a> Parser<'a> {
                         self.expect(lexer::SemiColon);
                     }
                     self.fake_semicolon = false;
+                    statements.push(expression);
+                }
+                else {
                     statements.push(expression);
                 }
             }
@@ -461,6 +463,7 @@ impl<'a> Parser<'a> {
         self.expect(lexer::LeftBrace);
 
         let mut code = String::new();
+        code.push_char('\n');
         loop {
             match self.next_token() {
                 lexer::LitString(ref string) => {
