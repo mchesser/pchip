@@ -7,6 +7,7 @@ pub struct Parser<'a> {
     tokens: Vec<lexer::Token>,
     logger: Logger<'a>,
     index: uint,
+    fake_semicolon: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -21,6 +22,7 @@ impl<'a> Parser<'a> {
             tokens: tokens,
             logger: logger,
             index: 0,
+            fake_semicolon: false,
         }
     }
 
@@ -40,7 +42,7 @@ impl<'a> Parser<'a> {
     fn expect(&mut self, token: lexer::TokenValue) {
         let span_start = self.current_pos();
         let next = self.next_token();
-        if  next != token {
+        if next != token {
             self.logger.report_error(format!("expected `{}` but found `{}`", token, next),
                 InputSpan::new(span_start, self.current_pos()));
             self.fatal_error();
@@ -265,7 +267,10 @@ impl<'a> Parser<'a> {
             else {
                 let expression = self.parse_expression();
                 if self.peek() != lexer::RightBrace {
-                    self.expect(lexer::SemiColon);
+                    if !self.fake_semicolon {
+                        self.expect(lexer::SemiColon);
+                    }
+                    self.fake_semicolon = false;
                     statements.push(expression);
                 }
             }
@@ -399,6 +404,11 @@ impl<'a> Parser<'a> {
             },
             _ => None,
         };
+
+        // Insert an implicit semicolon if there wasn't one at the end of the if statement
+        if self.peek() != lexer::SemiColon {
+            self.fake_semicolon = true;
+        }
 
         let if_statement = ast::IfStatement {
             condition: condition,
