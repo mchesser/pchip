@@ -298,7 +298,7 @@ impl<'a> Parser<'a> {
             },
             lexer::If => self.parse_if(),
             lexer::For => unimplemented!(),
-            lexer::While => unimplemented!(),
+            lexer::While => self.parse_while(),
             lexer::Loop => self.parse_loop(),
             lexer::Break => self.parse_break(),
             lexer::Return => self.parse_return(),
@@ -320,6 +320,7 @@ impl<'a> Parser<'a> {
             },
 
             lexer::Assignment => {
+                self.bump();
                 ast::Expression {
                     expr: box ast::AssignExpr(self.parse_assignment(name)),
                     rtype: ast::Primitive(ast::UnitType),
@@ -431,6 +432,11 @@ impl<'a> Parser<'a> {
         let span_start = self.current_pos();
         let body = self.parse_block();
 
+        // Insert an implicit semicolon if there wasn't one at the end of the loop statement
+        if self.peek() != lexer::SemiColon {
+            self.fake_semicolon = true;
+        }
+
         let loop_statement = ast::LoopStatement {
             body: body,
             span: InputSpan::new(span_start, self.current_pos()),
@@ -438,7 +444,52 @@ impl<'a> Parser<'a> {
 
         ast::Expression {
             expr: box ast::LoopExpr(loop_statement),
-            rtype: ast::Primitive(ast::UnitType),
+            rtype: ast::Primitive(ast::BottomType),
+        }
+    }
+
+    fn parse_while(&mut self) -> ast::Expression {
+        let span_start = self.current_pos();
+
+        // Transform the while statement into a loop with a if statement
+        let condition = self.parse_expression();
+        let break_body = ast::Block {
+            statements: vec![ast::Expression {
+                expr: box ast::Break,
+                rtype: ast::Primitive(ast::BottomType)
+            }],
+            span: InputSpan::new(span_start, self.current_pos()),
+        };
+
+        let loop_body = self.parse_block();
+        let body_span = loop_body.span.clone();
+
+        let real_body = ast::IfStatement {
+            condition: condition,
+            body: loop_body,
+            else_block: Some(break_body),
+            span: body_span.clone(),
+        };
+
+        // Insert an implicit semicolon if there wasn't one at the end of the while statement
+        if self.peek() != lexer::SemiColon {
+            self.fake_semicolon = true;
+        }
+
+        let loop_statement = ast::LoopStatement {
+            body: ast::Block {
+                statements: vec![ast::Expression {
+                    expr: box ast::IfExpr(real_body),
+                    rtype: ast::Primitive(ast::BottomType)
+                }],
+                span: body_span,
+            },
+            span: InputSpan::new(span_start, self.current_pos()),
+        };
+
+        ast::Expression {
+            expr: box ast::LoopExpr(loop_statement),
+            rtype: ast::Primitive(ast::BottomType),
         }
     }
 

@@ -131,7 +131,8 @@ impl<'a> Scope<'a> {
                     None => {
                         // Reached the top level scope, but still could not find the identifier
                         // therefore it doesn't not exist at this location.
-                        fail!("IDENT_NOT_FOUND_ERROR, TODO: improve error message")
+                        fail!("IDENT_NOT_FOUND_ERROR, ({}), TODO: improve error message",
+                            ident_name);
                     },
                 }
             },
@@ -334,13 +335,16 @@ impl CodeData {
 
     fn compile_loop(&mut self, scope: &mut Scope, loop_statement: &ast::LoopStatement) {
         let start_label = self.next_unique_label();
-        self.instructions.push(asm::Label(start_label));
+        self.instructions.push(asm::Label(start_label.clone()));
 
         // Add the end label to the loop ends vector, so that it can be used by breaks
         let end_label = self.next_unique_label();
         scope.loop_ends.push(end_label.clone());
 
         self.compile_block(scope, &loop_statement.body);
+
+        // Add jump to start
+        self.instructions.push(asm::Jump(start_label));
 
         // Add end label
         let end_label = scope.loop_ends.pop().expect("ICE: Missing label after loop");

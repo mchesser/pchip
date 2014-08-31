@@ -28,7 +28,6 @@ fn main() {
     };
     let mut parser = Parser::new(Lexer::new(input.as_slice()), Logger::new(input.as_slice(), false));
     let program = parser.parse();
-    println!("{}", program);
 
     let code = codegen(program);
 

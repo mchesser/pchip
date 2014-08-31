@@ -226,7 +226,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
 /// Scans till the end of the token returning the index of the end of the token
 fn scan_token(string: &str) -> uint {
     static TOKEN_BOUNDS: &'static [char] = &[
-        ' ', '\t', '\n', '#', ':', ';', ',', '(', ')', '{', '}', '.', '=', '+', '-', '"'
+        ' ', '\t', '\n', '\r', '#', ':', ';', ',', '(', ')', '{', '}', '.', '=', '+', '-', '"'
     ];
 
     match string.find(TOKEN_BOUNDS) {
