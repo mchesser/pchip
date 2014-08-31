@@ -1,0 +1,81 @@
+fn add(a: int, b: int) -> int {
+    asm {
+        "        lw    r1,-8(r30)",
+        "        lw    r2,-4(r30)",
+        "        add   r1,r1,r2",
+    }
+}
+
+fn sub(a: int, b: int) -> int {
+    asm {
+        "        lw    r1,-8(r30)",
+        "        lw    r2,-4(r30)",
+        "        sub   r1,r1,r2",
+    }
+}
+
+fn less_than(a: int, b: int) -> bool {
+    asm {
+        "        lw    r1,-8(r30)",
+        "        lw    r2,-4(r30)",
+        "        slt   r1,r1,r2",
+    }
+}
+
+fn less_than_eq(a: int, b: int) -> bool {
+    asm {
+        "        lw    r1,-8(r30)",
+        "        lw    r2,-4(r30)",
+        "        sle   r1,r1,r2",
+    }
+}
+
+# Compute the nth padovan number iteratively
+fn pad(n: int) -> int {
+    if less_than(n, 0) {
+        return -1;
+    }
+    
+    let n_m1 = 1;
+    let n_m2 = 1;
+    let n_m3 = 1;
+    
+    let i = 2;
+    let result = 1;
+    
+    while less_than(i, n) {
+        result = add(n_m3, n_m2);
+        n_m3 = n_m2;
+        n_m2 = n_m1;
+        n_m1 = result;
+        i = add(i, 1);
+    }
+    
+    result  
+}
+
+# Compute the sum of all padovan numbers up to n
+fn padSum(low: int, high: int, step: int) -> int {
+    if less_than(low, 0) {
+        return -1;
+    }
+    if less_than(high, low) {
+        return -1;
+    }
+    if less_than(step, 1) {
+        return -1;
+    }
+    
+    let i = low;
+    let result = 0;
+    while less_than_eq(i, high) {
+        result = add(result, pad(i));
+        i = add(i, step);
+    }
+    
+    result
+}
+
+fn main() {
+    let test = padSum(2, 11, 2);
+}

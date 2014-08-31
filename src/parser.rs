@@ -290,6 +290,15 @@ impl<'a> Parser<'a> {
         match self.next_token() {
             lexer::Ident(name) => self.handle_ident(name.to_string()),
             lexer::LitNum(value) => self.handle_num(value),
+            lexer::Minus => {
+                match self.peek() {
+                    lexer::LitNum(value) => {
+                        self.bump();
+                        self.handle_num(-value)
+                    },
+                    _ => fail!("ICE: Cannot negate expression")
+                }
+            }
             lexer::Let => {
                 ast::Expression {
                     expr: box ast::LetExpr(self.parse_let()),
