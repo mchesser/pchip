@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 
 use ast;
 
@@ -19,11 +20,25 @@ static RETURN_REG: RegId = 31;
 // Register used for storing the results of computations
 static RESULT_REG: RegId = 1;
 
-#[deriving(Clone, PartialEq)]
+#[deriving(Clone)]
 struct CompositeType {
     name: String,
     fields: HashMap<String, (u32, Type)>,
     size: u32,
+}
+
+impl PartialEq for CompositeType {
+    fn eq(&self, other: &CompositeType) -> bool {
+        // No two unique types can have the same name, so it is sufficient just to compare the
+        // names of the types to see if they are the same
+        self.name == other.name
+    }
+}
+
+impl fmt::Show for CompositeType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.name)
+    }
 }
 
 /// A resolved type
@@ -32,6 +47,7 @@ enum Type {
     Bool,
     Int,
     Unit,
+    BottomType,
     Array(Box<Type>, u32),
     Pointer(Box<Type>),
     Composite(Box<CompositeType>),
@@ -45,9 +61,24 @@ impl Type {
             Bool => 4,
             Int => 4,
             Unit => 0,
+            BottomType => 0,
             Array(ref tp, amount) => tp.size() * amount,
             Pointer(..) => 4,
             Composite(ref tp) => tp.size,
+        }
+    }
+}
+
+impl fmt::Show for Type {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Bool => write!(f, "bool"),
+            Int => write!(f, "int"),
+            Unit => write!(f, "()"),
+            BottomType => write!(f, "!"),
+            Array(ref tp, size) => write!(f, "[{}, ..{}]", tp, size),
+            Pointer(ref tp) => write!(f, "*{}", tp),
+            Composite(ref tp) => write!(f, "{}", tp),
         }
     }
 }
@@ -275,6 +306,7 @@ impl CodeData {
         let reserve_stack_index = self.instructions.len();
         self.instructions.push(asm::Nop);
 
+
         // Compile the body of the function
         self.compile_block(&mut local, &scope.functions[fn_id].ast.body);
 
@@ -343,6 +375,10 @@ impl CodeData {
     }
 
     fn compile_if(&mut self, scope: &mut Scope, if_statement: &ast::IfStatement) {
+        // Check that the expression returns a boolean type
+        let cond_type = self.resolve_type(scope, &if_statement.condition.rtype);
+        self.check_type(&cond_type, &Bool);
+
         self.compile_expression(scope, &if_statement.condition);
 
         let else_label = self.next_unique_label();
@@ -354,11 +390,17 @@ impl CodeData {
 
         self.instructions.push(asm::JumpIfZero(RESULT_REG, else_label.clone()));
 
+
         // Compile the then block
         self.compile_block(scope, &if_statement.body);
+        let then_rtype = self.resolve_type(scope, &if_statement.body.rtype());
 
         match if_statement.else_block {
             Some(ref block) => {
+                // Check that both sides return the same type
+                let else_rtype = self.resolve_type(scope, &block.rtype());
+                self.check_type(&else_rtype, &then_rtype);
+
                 // If there is an else block we need to add a jump from the then block to the
                 // end label, and add a label for the else part
                 self.instructions.push(asm::Jump(end_label.clone()));
@@ -366,7 +408,11 @@ impl CodeData {
                 // Then compile the else block
                 self.compile_block(scope, block);
             }
-            None => {}
+            None => {
+                // If the else block was left unspecified, then the if statement must return the
+                // unit type
+                self.check_type(&then_rtype, &Unit);
+            }
         }
 
         // Add the end label
@@ -374,6 +420,10 @@ impl CodeData {
     }
 
     fn compile_loop(&mut self, scope: &mut Scope, loop_statement: &ast::LoopStatement) {
+        // Check that the body of the loop returns the correct type
+        let body_rtype = self.resolve_type(scope, &loop_statement.body.rtype());
+        self.check_type(&body_rtype, &Unit);
+
         let start_label = self.next_unique_label();
         self.instructions.push(asm::Label(start_label.clone()));
 
@@ -392,23 +442,34 @@ impl CodeData {
     }
 
     fn compile_call(&mut self, scope: &mut Scope, call: &ast::FunctionCall) {
+        let mut call_args = vec![];
         let mut stack_offset = 0;
         for arg in call.args.iter() {
             let arg_type = self.resolve_type(scope, &arg.rtype);
+            let arg_size = arg_type.size();
+            call_args.push(arg_type);
 
             // Compile the expression
             self.compile_expression(scope, arg);
             // Write the result of the expression to the stack
             self.instructions.push(asm::Store32(asm::Const(0), STACK_POINTER, RESULT_REG));
             self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER, 4));
-            stack_offset += arg_type.size();
+            stack_offset += arg_size;
         }
 
-        // Check if the name resolves
+        // Get the function corresponding to the call
         let function = match scope.get_ident(&call.name, call.span.clone()) {
             FnIdent(ident) => ident,
             VarIdent(..) => fail!("ERROR_EXPECTED_FUNCTION_FOUND_VAR, TODO: Improve this error"),
         };
+
+        // Check that the call args match the function args
+        if call_args.len() != function.arg_types.len() {
+            fail!("INCORRECT NUMBER OF ARGUMENTS");
+        }
+        for (call_arg, fn_arg) in call_args.iter().zip(function.arg_types.iter()) {
+            self.check_type(call_arg, fn_arg);
+        }
 
         // Make the call
         self.instructions.push(asm::JumpStore(function.location.clone()));
@@ -461,6 +522,13 @@ impl CodeData {
             ref known_type => self.type_table[known_type.clone()].clone(),
         }
     }
+
+    /// Check that a type is the same as the expected type or one path never returns
+    fn check_type(&self, input: &Type, expected: &Type) {
+        if input != &BottomType && expected != &BottomType && input != expected {
+            fail!("INCORRECT TYPE expected: {}, found: {}", expected, input);
+        }
+    }
 }
 
 pub fn codegen(program: ast::Program) -> Vec<Instruction> {
@@ -474,6 +542,7 @@ pub fn codegen(program: ast::Program) -> Vec<Instruction> {
     data.type_table.insert(ast::Primitive(ast::IntType), Int);
     data.type_table.insert(ast::Primitive(ast::BoolType), Bool);
     data.type_table.insert(ast::Primitive(ast::UnitType), Unit);
+    data.type_table.insert(ast::Primitive(ast::BottomType), BottomType);
 
     // Parse globals
     for item in program.items.into_iter() {
