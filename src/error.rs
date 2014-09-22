@@ -36,20 +36,27 @@ impl InputPos {
 }
 
 pub struct Logger<'a> {
-    input: &'a str,
+    lines: Vec<&'a str>,
     print_span: bool,
 }
 
 impl<'a> Logger<'a> {
-    pub fn new(input: &str, print_span: bool) -> Logger {
+    pub fn new(input: &'a str, print_span: bool) -> Logger<'a> {
         Logger {
-            input: input,
+            lines: input.lines().collect(),
             print_span: print_span,
         }
     }
 
     pub fn report_error(&self, message: String, input_span: InputSpan) {
-        println!("Error {}:{} - {}:{} : {}", input_span.start.line, input_span.start.col,
+        println!("unknown.pcp:{}:{}: {}:{} {}", input_span.start.line, input_span.start.col,
             input_span.end.line, input_span.end.col, message);
+
+        if self.print_span {
+            for i in range(input_span.start.line, input_span.end.line) {
+                println!("{}", self.lines[i]);
+            }
+            println!("");
+        }
     }
 }

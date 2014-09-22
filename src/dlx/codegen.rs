@@ -4,7 +4,7 @@ use std::fmt;
 use ast;
 
 use dlx::asm;
-use dlx::asm::{RegId, SpecialRegId, LabelId, TrapId};
+use dlx::asm::{RegId, LabelId};
 use dlx::asm::Instruction;
 
 use error::{InputPos, InputSpan, Logger};
@@ -213,14 +213,61 @@ impl<'a> Scope<'a> {
     }
 }
 
+pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>) -> Vec<Instruction> {
+    let mut global = Scope::new("exit".into_string());
+    let mut data = CodeData {
+        instructions: vec![],
+        type_table: HashMap::new(),
+        label_count: 0,
+        logger: logger,
+    };
 
-struct CodeData {
+    data.type_table.insert(ast::Primitive(ast::IntType), Int);
+    data.type_table.insert(ast::Primitive(ast::BoolType), Bool);
+    data.type_table.insert(ast::Primitive(ast::UnitType), Unit);
+    data.type_table.insert(ast::Primitive(ast::BottomType), BottomType);
+
+    // Parse globals
+    for item in program.items.into_iter() {
+        let location = data.next_unique_label();
+        match item {
+            ast::FunctionItem(fn_item) => {
+                let id = FnIdentId(global.functions.len());
+                global.add_ident(fn_item.name.clone(), id, fn_item.span.clone());
+                global.functions.push(Function::new(fn_item, &data.type_table, location));
+            },
+            ast::StructItem(struct_item) => {
+                unimplemented!();
+            },
+            ast::LetItem(let_item) => {
+                let id = VarIdentId(global.vars.len());
+                global.add_ident(let_item.name.clone(), id, let_item.span.clone());
+                global.vars.push(Variable::new(let_item, &data.type_table, Label(location)));
+            },
+        }
+    }
+
+    // Compile global variables
+    for i in range(0u, global.vars.len()) {
+        data.compile_global_var(&global, i);
+    }
+
+    // Compile global functions
+    for i in range(0u, global.functions.len()) {
+        data.compile_global_fn(&global, i);
+    }
+
+    data.instructions
+}
+
+struct CodeData<'a> {
     instructions: Vec<Instruction>,
     type_table: HashMap<ast::Type, Type>,
     label_count: uint,
+    logger: &'a Logger<'a>,
 }
 
-impl CodeData {
+impl<'a> CodeData<'a> {
     /// Generating a unique label id, by keeping track of the number of labels generated and
     /// appending the label count to the label.
     fn next_unique_label(&mut self) -> LabelId {
@@ -536,50 +583,4 @@ impl CodeData {
             fail!("INCORRECT TYPE expected: {}, found: {}", expected, input);
         }
     }
-}
-
-pub fn codegen(program: ast::Program) -> Vec<Instruction> {
-    let mut global = Scope::new("exit".into_string());
-    let mut data = CodeData {
-        instructions: vec![],
-        type_table: HashMap::new(),
-        label_count: 0,
-    };
-
-    data.type_table.insert(ast::Primitive(ast::IntType), Int);
-    data.type_table.insert(ast::Primitive(ast::BoolType), Bool);
-    data.type_table.insert(ast::Primitive(ast::UnitType), Unit);
-    data.type_table.insert(ast::Primitive(ast::BottomType), BottomType);
-
-    // Parse globals
-    for item in program.items.into_iter() {
-        let location = data.next_unique_label();
-        match item {
-            ast::FunctionItem(fn_item) => {
-                let id = FnIdentId(global.functions.len());
-                global.add_ident(fn_item.name.clone(), id, fn_item.span.clone());
-                global.functions.push(Function::new(fn_item, &data.type_table, location));
-            },
-            ast::StructItem(struct_item) => {
-                unimplemented!();
-            },
-            ast::LetItem(let_item) => {
-                let id = VarIdentId(global.vars.len());
-                global.add_ident(let_item.name.clone(), id, let_item.span.clone());
-                global.vars.push(Variable::new(let_item, &data.type_table, Label(location)));
-            },
-        }
-    }
-
-    // Compile global variables
-    for i in range(0u, global.vars.len()) {
-        data.compile_global_var(&global, i);
-    }
-
-    // Compile global functions
-    for i in range(0u, global.functions.len()) {
-        data.compile_global_fn(&global, i);
-    }
-
-    data.instructions
 }

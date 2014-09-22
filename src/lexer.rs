@@ -15,6 +15,7 @@ pub enum TokenValue {
     Comma,
     Colon,
     SemiColon,
+    Dot,
 
     Equal,
     Plus,
@@ -132,6 +133,8 @@ impl<'a> Iterator<Token> for Lexer<'a> {
             ':' => Colon,
 
             ',' => Comma,
+
+            '.' => Dot,
 
             '=' => {
                 if len == 1 { Assignment }

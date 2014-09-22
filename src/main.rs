@@ -3,7 +3,7 @@
 use std::io::File;
 use std::os;
 
-use parser::Parser;
+use parser::parse;
 use lexer::Lexer;
 use error::Logger;
 use dlx::codegen::codegen;
@@ -28,10 +28,10 @@ fn main() {
         Ok(input) => input,
         Err(err)  => fail!("Error reading file: {}", err)
     };
-    let mut parser = Parser::new(Lexer::new(input.as_slice()), Logger::new(input.as_slice(), false));
-    let program = parser.parse();
 
-    let code = codegen(program);
+    let logger = Logger::new(input.as_slice(), false);
+    let program = parse(Lexer::new(input.as_slice()), &logger);
+    let code = codegen(program, &logger);
 
     let mut space = 0;
     let mut program_string = String::new();

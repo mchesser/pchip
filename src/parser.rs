@@ -3,29 +3,30 @@ use error::{InputPos, InputSpan, Logger};
 use lexer;
 use lexer::{Lexer, Token};
 
-pub struct Parser<'a> {
+pub fn parse<'a>(mut lexer: Lexer, logger: &'a Logger<'a>) -> ast::Program {
+    let mut tokens: Vec<lexer::Token> = lexer.collect();
+    let end_token = lexer::Token {
+        value: lexer::Eof,
+        pos: tokens.last().map(|t| t.pos.clone()).unwrap_or(InputPos::start()),
+    };
+    tokens.push(end_token);
+    let mut parser = Parser {
+        tokens: tokens,
+        logger: logger,
+        index: 0,
+        fake_semicolon: false,
+    };
+    parser.parse()
+}
+
+struct Parser<'a> {
     tokens: Vec<lexer::Token>,
-    logger: Logger<'a>,
+    logger: &'a Logger<'a>,
     index: uint,
     fake_semicolon: bool,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(mut lexer: Lexer, logger: Logger<'a>) -> Parser<'a> {
-        let mut tokens: Vec<lexer::Token> = lexer.collect();
-        let end_token = lexer::Token {
-            value: lexer::Eof,
-            pos: tokens.last().map(|t| t.pos.clone()).unwrap_or(InputPos::start()),
-        };
-        tokens.push(end_token);
-        Parser {
-            tokens: tokens,
-            logger: logger,
-            index: 0,
-            fake_semicolon: false,
-        }
-    }
-
     fn peek(&self) -> lexer::TokenValue {
         self.tokens[self.index].value.clone()
     }
@@ -57,7 +58,7 @@ impl<'a> Parser<'a> {
         self.tokens[self.index].pos.clone()
     }
 
-    pub fn parse(&mut self) -> ast::Program {
+    fn parse(&mut self) -> ast::Program {
         let mut items = vec![];
         let span_start = self.current_pos();
         let mut span_end = self.current_pos();
