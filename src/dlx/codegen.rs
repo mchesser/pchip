@@ -105,21 +105,22 @@ impl Function {
     }
 }
 
-#[deriving(Clone)]
-enum LabelOrOffset {
+#[deriving(Clone, Show)]
+enum Location {
     Label(LabelId),
     Offset(i16),
+    Register(RegId),
 }
 
 struct Variable {
     ast: ast::LetStatement,
     rtype: Type,
-    location: LabelOrOffset,
+    location: Location,
 }
 
 impl Variable {
     fn new(ast: ast::LetStatement, type_table: &HashMap<ast::Type, Type>,
-        location: LabelOrOffset) -> Variable
+        location: Location) -> Variable
     {
         let rtype = type_table[ast.var_type].clone();
         Variable {
@@ -232,7 +233,7 @@ impl CodeData {
         // Add the variable's label
         let label = match scope.vars[var_id].location {
             Label(ref s) => s.clone(),
-            Offset(..) => fail!("ICE: Found offset instead of label when compiling global var"),
+            ref other => fail!("ICE: Location of global var is not a label, was {}", other),
         };
         self.instructions.push(asm::Label(label));
 
@@ -262,7 +263,7 @@ impl CodeData {
         }
     }
 
-    /// Compile a global function. (Are local functions useful?)
+    /// Compile a global function.
     fn compile_global_fn(&mut self, scope: &Scope, fn_id: uint) {
         // Add the functions label
         let label = scope.functions[fn_id].location.clone();
@@ -355,12 +356,15 @@ impl CodeData {
                 };
                 match var_location {
                     Label(label) => {
-                        self.instructions.push(asm::Load32(RESULT_REG,
-                            asm::Unknown(label), ZERO_REG));
+                        self.instructions.push(asm::Load32(RESULT_REG, asm::Unknown(label),
+                            ZERO_REG));
                     },
                     Offset(amount) => {
-                        self.instructions.push(asm::Load32(RESULT_REG,
-                            asm::Const(amount), FRAME_POINTER));
+                        self.instructions.push(asm::Load32(RESULT_REG, asm::Const(amount),
+                            FRAME_POINTER));
+                    },
+                    Register(id) => {
+                        self.instructions.push(asm::AddSigned(RESULT_REG, id, ZERO_REG));
                     },
                 }
             },
@@ -511,7 +515,10 @@ impl CodeData {
             },
             Offset(amount) => {
                 self.instructions.push(asm::Store32(asm::Const(amount), FRAME_POINTER, RESULT_REG));
-            }
+            },
+            Register(id) => {
+                self.instructions.push(asm::AddSigned(id, RESULT_REG, ZERO_REG));
+            },
         }
     }
 
