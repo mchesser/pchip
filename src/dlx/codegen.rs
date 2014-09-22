@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use ast;
-use ast::Type;
 
 use dlx::asm;
 use dlx::asm::{RegId, SpecialRegId, LabelId, TrapId};
@@ -20,19 +19,56 @@ static RETURN_REG: RegId = 31;
 // Register used for storing the results of computations
 static RESULT_REG: RegId = 1;
 
-struct TypeProperty {
+#[deriving(Clone, PartialEq)]
+struct CompositeType {
+    name: String,
+    fields: HashMap<String, (u32, Type)>,
     size: u32,
+}
+
+/// A resolved type
+#[deriving(Clone, PartialEq)]
+enum Type {
+    Bool,
+    Int,
+    Unit,
+    Array(Box<Type>, u32),
+    Pointer(Box<Type>),
+    Composite(Box<CompositeType>),
+}
+
+impl Type {
+    /// Returns the size of the type.
+    /// Currently all types must be word aligned.
+    fn size(&self) -> u32 {
+        match *self {
+            Bool => 4,
+            Int => 4,
+            Unit => 0,
+            Array(ref tp, amount) => tp.size() * amount,
+            Pointer(..) => 4,
+            Composite(ref tp) => tp.size,
+        }
+    }
 }
 
 struct Function {
     ast: ast::FunctionDeclaration,
+    arg_types: Vec<Type>,
+    rtype: Type,
     location: LabelId,
 }
 
 impl Function {
-    fn new(ast: ast::FunctionDeclaration, location: LabelId) -> Function {
+    fn new(ast: ast::FunctionDeclaration, type_table: &HashMap<ast::Type, Type>,
+        location: LabelId) -> Function
+    {
+        let arg_types = ast.params.iter().map(|param| type_table[param.1].clone()).collect();
+        let rtype = type_table[ast.rtype].clone();
         Function {
             ast: ast,
+            arg_types: arg_types,
+            rtype: rtype,
             location: location,
         }
     }
@@ -46,19 +82,24 @@ enum LabelOrOffset {
 
 struct Variable {
     ast: ast::LetStatement,
+    rtype: Type,
     location: LabelOrOffset,
 }
 
 impl Variable {
-    fn new(ast: ast::LetStatement, location: LabelOrOffset) -> Variable {
+    fn new(ast: ast::LetStatement, type_table: &HashMap<ast::Type, Type>,
+        location: LabelOrOffset) -> Variable
+    {
+        let rtype = type_table[ast.var_type].clone();
         Variable {
             ast: ast,
+            rtype: rtype,
             location: location,
         }
     }
 }
 
-#[deriving(PartialEq, Eq, Hash)]
+#[deriving(PartialEq, Hash)]
 enum IdentId {
     FnIdentId(uint),
     VarIdentId(uint),
@@ -70,10 +111,10 @@ enum Ident<'a> {
 }
 
 impl<'a> Ident<'a> {
-    fn rtype(&self) -> ast::Type {
+    fn rtype(&self) -> Type {
         match *self {
-            FnIdent(func) => func.ast.rtype.clone(),
-            VarIdent(var) => var.ast.var_type.clone(),
+            FnIdent(func) => func.rtype.clone(),
+            VarIdent(var) => var.rtype.clone(),
         }
     }
 }
@@ -143,7 +184,7 @@ impl<'a> Scope<'a> {
 
 struct CodeData {
     instructions: Vec<Instruction>,
-    type_table: HashMap<ast::Type, TypeProperty>,
+    type_table: HashMap<ast::Type, Type>,
     label_count: uint,
 }
 
@@ -212,20 +253,18 @@ impl CodeData {
         // param stored at FRAME_POINTER[-1]
         let mut next_param_addr = 0;
         for &(ref name, ref var_type) in scope.functions[fn_id].ast.params.iter().rev() {
-            // Get the size of the type, ensuring that it is word aligned
-            let size = self.get_type_size(scope, var_type.clone());
-            next_param_addr -= size;
-
-            let var = ast::LetStatement {
+            let var_ast = ast::LetStatement {
                 name: name.clone(),
                 var_type: var_type.clone(),
                 assignment: None,
                 span: span.clone(),
             };
+            let var = Variable::new(var_ast, &self.type_table, Offset(next_param_addr as i16));
+            next_param_addr -= var.rtype.size();
 
             let id = VarIdentId(local.vars.len());
             local.add_ident(name.clone(), id, span.clone());
-            local.vars.push(Variable::new(var, Offset(next_param_addr as i16)));
+            local.vars.push(var);
         }
 
         // Reserve stack space for the function:
@@ -246,7 +285,7 @@ impl CodeData {
 
         self.instructions.push(asm::Label(local.end_label.clone()));
 
-        // Add function return
+        // Remove this stack frame, and return to the previous one
         self.instructions.push(asm::Load32(RETURN_REG, asm::Const(4), FRAME_POINTER));
         self.instructions.push(asm::AddSigned(STACK_POINTER, FRAME_POINTER, ZERO_REG));
         self.instructions.push(asm::Load32(FRAME_POINTER, asm::Const(0), STACK_POINTER));
@@ -305,6 +344,7 @@ impl CodeData {
 
     fn compile_if(&mut self, scope: &mut Scope, if_statement: &ast::IfStatement) {
         self.compile_expression(scope, &if_statement.condition);
+
         let else_label = self.next_unique_label();
         let end_label = match if_statement.else_block {
             Some(..) => self.next_unique_label(),
@@ -354,12 +394,14 @@ impl CodeData {
     fn compile_call(&mut self, scope: &mut Scope, call: &ast::FunctionCall) {
         let mut stack_offset = 0;
         for arg in call.args.iter() {
+            let arg_type = self.resolve_type(scope, &arg.rtype);
+
             // Compile the expression
             self.compile_expression(scope, arg);
             // Write the result of the expression to the stack
             self.instructions.push(asm::Store32(asm::Const(0), STACK_POINTER, RESULT_REG));
             self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER, 4));
-            stack_offset += self.get_type_size(scope, arg.rtype.clone());
+            stack_offset += arg_type.size();
         }
 
         // Check if the name resolves
@@ -377,14 +419,14 @@ impl CodeData {
     }
 
     fn compile_let(&mut self, scope: &mut Scope, let_statement: &ast::LetStatement) {
-        // Reserve an address for this variable
-        let offset = scope.next_offset;
-        scope.next_offset += self.get_type_size(scope, let_statement.var_type.clone()) as uint;
-
         // Register this variable
         let id = VarIdentId(scope.vars.len());
         scope.add_ident(let_statement.name.clone(), id, let_statement.span);
-        scope.vars.push(Variable::new(let_statement.clone(), Offset(offset as i16)));
+
+        let var = Variable::new(let_statement.clone(), &self.type_table,
+            Offset(scope.next_offset as i16));
+        scope.next_offset += var.rtype.size() as uint;
+        scope.vars.push(var);
 
         // Compile optional assignment
         match let_statement.assignment {
@@ -412,16 +454,11 @@ impl CodeData {
         }
     }
 
-    fn get_type_size(&self, scope: &Scope, type_value: ast::Type) -> u32 {
-        match type_value {
-            t @ ast::Primitive(..) => {
-                self.type_table[t].size
-            },
-            ast::VariableType(name) => {
-                let var_type = scope.get_ident(&name, InputSpan::invalid()).rtype();
-                self.get_type_size(scope, var_type)
-            },
-            _ => fail!("ICE: User types unsupported"),
+    /// Resolve unknown types, and type aliases
+    fn resolve_type(&self, scope: &Scope, type_value: &ast::Type) -> Type {
+        match *type_value {
+            ast::VariableType(ref name) => scope.get_ident(name, InputSpan::invalid()).rtype(),
+            ref known_type => self.type_table[known_type.clone()].clone(),
         }
     }
 }
@@ -434,8 +471,9 @@ pub fn codegen(program: ast::Program) -> Vec<Instruction> {
         label_count: 0,
     };
 
-    data.type_table.insert(ast::Primitive(ast::IntType), TypeProperty { size: 4 });
-    data.type_table.insert(ast::Primitive(ast::UnitType), TypeProperty { size: 0 });
+    data.type_table.insert(ast::Primitive(ast::IntType), Int);
+    data.type_table.insert(ast::Primitive(ast::BoolType), Bool);
+    data.type_table.insert(ast::Primitive(ast::UnitType), Unit);
 
     // Parse globals
     for item in program.items.into_iter() {
@@ -444,7 +482,7 @@ pub fn codegen(program: ast::Program) -> Vec<Instruction> {
             ast::FunctionItem(fn_item) => {
                 let id = FnIdentId(global.functions.len());
                 global.add_ident(fn_item.name.clone(), id, fn_item.span.clone());
-                global.functions.push(Function::new(fn_item, location));
+                global.functions.push(Function::new(fn_item, &data.type_table, location));
             },
             ast::StructItem(struct_item) => {
                 unimplemented!();
@@ -452,7 +490,7 @@ pub fn codegen(program: ast::Program) -> Vec<Instruction> {
             ast::LetItem(let_item) => {
                 let id = VarIdentId(global.vars.len());
                 global.add_ident(let_item.name.clone(), id, let_item.span.clone());
-                global.vars.push(Variable::new(let_item, Label(location)));
+                global.vars.push(Variable::new(let_item, &data.type_table, Label(location)));
             },
         }
     }

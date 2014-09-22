@@ -1,3 +1,5 @@
+#![feature(tuple_indexing)]
+
 use std::io::File;
 use std::os;
 
