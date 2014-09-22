@@ -29,7 +29,7 @@ fn main() {
         Err(err)  => fail!("Error reading file: {}", err)
     };
 
-    let logger = Logger::new(input.as_slice(), false);
+    let logger = Logger::new(input.as_slice(), true);
     let program = parse(Lexer::new(input.as_slice()), &logger);
     let code = codegen(program, &logger);
 

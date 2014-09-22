@@ -71,7 +71,6 @@ impl<'a> Parser<'a> {
                 },
                 None => break,
             }
-            println!("{}\n", items.last());
         }
 
         ast::Program {
@@ -287,15 +286,14 @@ impl<'a> Parser<'a> {
 
     fn parse_expression(&mut self) -> ast::Expression {
         let span_start = self.current_pos();
-
         match self.next_token() {
-            lexer::Ident(name) => self.handle_ident(name.to_string()),
-            lexer::LitNum(value) => self.handle_num(value),
+            lexer::Ident(name) => self.handle_ident(name.to_string(), span_start.clone()),
+            lexer::LitNum(value) => self.handle_num(value, span_start.clone()),
             lexer::Minus => {
                 match self.peek() {
                     lexer::LitNum(value) => {
                         self.bump();
-                        self.handle_num(-value)
+                        self.handle_num(-value, span_start.clone())
                     },
                     _ => fail!("ICE: Cannot negate expression")
                 }
@@ -304,15 +302,16 @@ impl<'a> Parser<'a> {
                 ast::Expression {
                     expr: box ast::LetExpr(self.parse_let()),
                     rtype: ast::Primitive(ast::UnitType),
+                    span: InputSpan::new(span_start, self.current_pos()),
                 }
             },
-            lexer::If => self.parse_if(),
+            lexer::If => self.parse_if(span_start.clone()),
             lexer::For => unimplemented!(),
-            lexer::While => self.parse_while(),
-            lexer::Loop => self.parse_loop(),
-            lexer::Break => self.parse_break(),
-            lexer::Return => self.parse_return(),
-            lexer::Asm => self.parse_asm(),
+            lexer::While => self.parse_while(span_start.clone()),
+            lexer::Loop => self.parse_loop(span_start.clone()),
+            lexer::Break => self.parse_break(span_start.clone()),
+            lexer::Return => self.parse_return(span_start.clone()),
+            lexer::Asm => self.parse_asm(span_start.clone()),
             invalid => {
                 let span_end = self.current_pos();
                 self.logger.report_error(format!("expected `<Expression>` but found `{}`", invalid),
@@ -322,11 +321,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn handle_ident(&mut self, name: String) -> ast::Expression {
+    fn handle_ident(&mut self, name: String, span_start: InputPos) -> ast::Expression {
         match self.peek() {
             lexer::LeftParen => {
                 self.bump();
-                self.parse_call(name)
+                self.parse_call(name, span_start)
             },
 
             lexer::Assignment => {
@@ -334,6 +333,7 @@ impl<'a> Parser<'a> {
                 ast::Expression {
                     expr: box ast::AssignExpr(self.parse_assignment(name)),
                     rtype: ast::Primitive(ast::UnitType),
+                    span: InputSpan::new(span_start, self.current_pos()),
                 }
             }
 
@@ -346,13 +346,13 @@ impl<'a> Parser<'a> {
                 ast::Expression {
                     expr: box ast::VariableExpr(name.clone()),
                     rtype: ast::VariableType(name),
+                    span: InputSpan::new(span_start, self.current_pos()),
                 }
             }
         }
     }
 
-    fn parse_call(&mut self, name: String) -> ast::Expression {
-        let span_start = self.current_pos();
+    fn parse_call(&mut self, name: String, span_start: InputPos) -> ast::Expression {
         let mut args = vec![];
         loop {
             if self.peek() == lexer::RightParen {
@@ -382,6 +382,7 @@ impl<'a> Parser<'a> {
         ast::Expression {
             expr: box ast::CallExpr(function_call),
             rtype: ast::VariableType(name),
+            span: InputSpan::new(span_start, self.current_pos()),
         }
     }
 
@@ -394,16 +395,15 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn handle_num(&mut self, val: int) -> ast::Expression {
+    fn handle_num(&mut self, val: int, span_start: InputPos) -> ast::Expression {
         ast::Expression {
             expr: box ast::LitNumExpr(val),
             rtype: ast::Primitive(ast::IntType),
+            span: InputSpan::new(span_start, self.current_pos()),
         }
     }
 
-    fn parse_if(&mut self) -> ast::Expression {
-        let span_start = self.current_pos();
-
+    fn parse_if(&mut self, span_start: InputPos) -> ast::Expression {
         let condition = self.parse_expression();
         let body = self.parse_block();
         let else_block = match self.peek() {
@@ -435,11 +435,11 @@ impl<'a> Parser<'a> {
         ast::Expression {
             expr: box ast::IfExpr(if_statement),
             rtype: rtype,
+            span: InputSpan::new(span_start, self.current_pos()),
         }
     }
 
-    fn parse_loop(&mut self) -> ast::Expression {
-        let span_start = self.current_pos();
+    fn parse_loop(&mut self, span_start: InputPos) -> ast::Expression {
         let body = self.parse_block();
 
         // Insert an implicit semicolon if there wasn't one at the end of the loop statement
@@ -455,18 +455,18 @@ impl<'a> Parser<'a> {
         ast::Expression {
             expr: box ast::LoopExpr(loop_statement),
             rtype: ast::Primitive(ast::BottomType),
+            span: InputSpan::new(span_start, self.current_pos()),
         }
     }
 
-    fn parse_while(&mut self) -> ast::Expression {
-        let span_start = self.current_pos();
-
+    fn parse_while(&mut self, span_start: InputPos) -> ast::Expression {
         // Transform the while statement into a loop with a if statement
         let condition = self.parse_expression();
         let break_body = ast::Block {
             statements: vec![ast::Expression {
                 expr: box ast::Break,
-                rtype: ast::Primitive(ast::BottomType)
+                rtype: ast::Primitive(ast::BottomType),
+                span: InputSpan::invalid(),
             }],
             span: InputSpan::new(span_start, self.current_pos()),
         };
@@ -478,7 +478,7 @@ impl<'a> Parser<'a> {
             condition: condition,
             body: loop_body,
             else_block: Some(break_body),
-            span: body_span.clone(),
+            span: InputSpan::new(span_start, self.current_pos()),
         };
 
         // Insert an implicit semicolon if there wasn't one at the end of the while statement
@@ -490,7 +490,8 @@ impl<'a> Parser<'a> {
             body: ast::Block {
                 statements: vec![ast::Expression {
                     expr: box ast::IfExpr(real_body),
-                    rtype: ast::Primitive(ast::BottomType)
+                    rtype: ast::Primitive(ast::BottomType),
+                    span: InputSpan::invalid(),
                 }],
                 span: body_span,
             },
@@ -500,26 +501,29 @@ impl<'a> Parser<'a> {
         ast::Expression {
             expr: box ast::LoopExpr(loop_statement),
             rtype: ast::Primitive(ast::BottomType),
+            span: InputSpan::new(span_start, self.current_pos()),
         }
     }
 
-    fn parse_break(&mut self) -> ast::Expression {
+    fn parse_break(&mut self, span_start: InputPos) -> ast::Expression {
         ast::Expression {
             expr: box ast::Break,
             rtype: ast::Primitive(ast::BottomType),
+            span: InputSpan::new(span_start, self.current_pos()),
         }
     }
 
-    fn parse_return(&mut self) -> ast::Expression {
+    fn parse_return(&mut self, span_start: InputPos) -> ast::Expression {
         let expression = self.parse_expression();
         let rtype = expression.rtype.clone();
         ast::Expression {
             expr: box ast::Return(expression),
             rtype: rtype,
+            span: InputSpan::new(span_start, self.current_pos()),
         }
     }
 
-    fn parse_asm(&mut self) -> ast::Expression {
+    fn parse_asm(&mut self, span_start: InputPos) -> ast::Expression {
         let span_start = self.current_pos();
         self.expect(lexer::LeftBrace);
 
@@ -559,6 +563,7 @@ impl<'a> Parser<'a> {
         ast::Expression {
             expr: box ast::AsmOpExpr(code),
             rtype: ast::Primitive(ast::AnyType),
+            span: InputSpan::new(span_start, self.current_pos()),
         }
     }
 }

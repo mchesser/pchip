@@ -56,6 +56,7 @@ pub enum Type {
 pub struct Expression {
     pub expr: Box<Expr>,
     pub rtype: Type,
+    pub span: InputSpan,
 }
 
 #[deriving(Show, Clone)]

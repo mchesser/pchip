@@ -1,3 +1,5 @@
+use std::iter::range_inclusive;
+
 #[deriving(Show, Clone)]
 pub struct InputSpan {
     pub start: InputPos,
@@ -53,8 +55,8 @@ impl<'a> Logger<'a> {
             input_span.end.line, input_span.end.col, message);
 
         if self.print_span {
-            for i in range(input_span.start.line, input_span.end.line) {
-                println!("{}", self.lines[i]);
+            for i in range_inclusive(input_span.start.line, input_span.end.line) {
+                println!("{}", self.lines[i-1]);
             }
             println!("");
         }

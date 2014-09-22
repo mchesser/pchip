@@ -154,7 +154,7 @@ impl<'a> Ident<'a> {
 struct Scope<'a> {
     functions: Vec<Function>,
     vars: Vec<Variable>,
-    next_offset: uint,
+    next_offset: i16,
     ident_table: HashMap<String, IdentId>,
     loop_ends: Vec<LabelId>,
     end_label: LabelId,
@@ -268,6 +268,11 @@ struct CodeData<'a> {
 }
 
 impl<'a> CodeData<'a> {
+    /// Codegen experienced a fatal error which must kill the program
+    fn fatal_error(&self) -> ! {
+        fail!();
+    }
+
     /// Generating a unique label id, by keeping track of the number of labels generated and
     /// appending the label count to the label.
     fn next_unique_label(&mut self) -> LabelId {
@@ -359,7 +364,7 @@ impl<'a> CodeData<'a> {
         self.compile_block(&mut local, &scope.functions[fn_id].ast.body);
 
         // Now set the amount of stack space to allocate
-        let frame_size = local.next_offset as i16;
+        let frame_size = local.next_offset;
         *self.instructions.get_mut(reserve_stack_index) =
             asm::AddSignedValue(STACK_POINTER, STACK_POINTER, frame_size);
 
@@ -379,6 +384,7 @@ impl<'a> CodeData<'a> {
     }
 
     fn compile_expression(&mut self, scope: &mut Scope, expression: &ast::Expression) {
+        let span = expression.span;
         match *expression.expr {
             ast::IfExpr(ref inner) => self.compile_if(scope, inner),
             ast::LoopExpr(ref inner) => self.compile_loop(scope, inner),
@@ -386,7 +392,10 @@ impl<'a> CodeData<'a> {
             ast::Break => {
                 match scope.loop_ends.last() {
                     Some(label) => self.instructions.push(asm::Jump(label.clone())),
-                    None => fail!("INVALID_BREAK_ERROR, TODO: Improve error message"),
+                    None => {
+                        self.logger.report_error(format!("`break` outside of loop"), span);
+                        self.fatal_error();
+                    },
                 }
             },
             ast::Return(ref inner) => {
@@ -536,8 +545,8 @@ impl<'a> CodeData<'a> {
         scope.add_ident(let_statement.name.clone(), id, let_statement.span);
 
         let var = Variable::new(let_statement.clone(), &self.type_table,
-            Offset(scope.next_offset as i16));
-        scope.next_offset += var.rtype.size() as uint;
+            Offset(scope.next_offset));
+        scope.next_offset += var.rtype.size() as i16;
         scope.vars.push(var);
 
         // Compile optional assignment
