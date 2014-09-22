@@ -523,14 +523,13 @@ impl<'a> Parser<'a> {
         self.expect(lexer::LeftBrace);
 
         let mut code = String::new();
-        code.push_char('\n');
         loop {
             match self.next_token() {
                 lexer::LitString(ref string) => {
                     code.push_str(string.as_slice());
-                    code.push_char('\n');
                 },
                 lexer::RightBrace => {
+                    code.pop_char();
                     break;
                 },
                 invalid => {
@@ -543,7 +542,10 @@ impl<'a> Parser<'a> {
 
             match self.next_token() {
                 lexer::RightBrace => break,
-                lexer::Comma => continue,
+                lexer::Comma => {
+                    code.push_char('\n');
+                    continue;
+                },
                 invalid => {
                     self.logger.report_error(
                         format!("expected `,` or `}}` but found, `{}`", invalid),

@@ -41,6 +41,14 @@ fn main() {
                 program_string.push_str(label.as_slice());
                 space += label.len();
             },
+            dlx::asm::RawAsm(data) => {
+                if space != 0 {
+                    program_string.push_char('\n');
+                    space = 0;
+                }
+                program_string.push_str(data.as_slice());
+                program_string.push_char('\n');
+            },
             other => {
                 let data = other.into_string();
                 program_string.grow(8 - space, ' ');
