@@ -33,7 +33,7 @@ fn main() {
 
     let mut space = 0;
     let mut program_string = String::new();
-    for inst in code.move_iter() {
+    for inst in code.into_iter() {
         match inst {
             dlx::asm::Label(label) => {
                 program_string.push_str(label.as_slice());

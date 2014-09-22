@@ -352,8 +352,6 @@ impl CodeData {
     }
 
     fn compile_call(&mut self, scope: &mut Scope, call: &ast::FunctionCall) {
-        // Really should check types here....
-        println!("----!!! WARNING IGNORING TYPES !!!----");
         let mut stack_offset = 0;
         for arg in call.args.iter() {
             // Compile the expression
@@ -440,7 +438,7 @@ pub fn codegen(program: ast::Program) -> Vec<Instruction> {
     data.type_table.insert(ast::Primitive(ast::UnitType), TypeProperty { size: 0 });
 
     // Parse globals
-    for item in program.items.move_iter() {
+    for item in program.items.into_iter() {
         let location = data.next_unique_label();
         match item {
             ast::FunctionItem(fn_item) => {
