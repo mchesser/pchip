@@ -28,26 +28,17 @@ impl Item {
 pub enum PrimitiveType {
     UnitType,
     IntType,
+    CharType,
     BoolType,
     AnyType,
     BottomType,
 }
 
-impl PrimitiveType {
-    pub fn size(&self) -> uint {
-        match *self {
-            UnitType => 0,
-            IntType => 4,
-            BoolType => 4,
-            BottomType => 0,
-            AnyType => fail!("ICE: Attempted to determine the size of AnyType"),
-        }
-    }
-}
-
 #[deriving(Show, Hash, Clone, PartialEq, Eq)]
 pub enum Type {
     Primitive(PrimitiveType),
+    Pointer(Box<Type>),
+    DerefType(Box<Type>),
     UserType(String),
     VariableType(String),
 }
@@ -75,6 +66,7 @@ pub enum Expr {
     LitNumExpr(int),
 
     // Other
+    DerefExpr(Expression),
     AsmOpExpr(String),
     EmptyExpr,
 }

@@ -84,7 +84,11 @@ impl<'a> Parser<'a> {
         let item = match self.next_token() {
             lexer::Fn => ast::FunctionItem(self.parse_function()),
             lexer::Struct => ast::StructItem(self.parse_struct_decl()),
-            lexer::Let => ast::LetItem(self.parse_let()),
+            lexer::Let => {
+                let item = ast::LetItem(self.parse_let());
+                self.expect(lexer::SemiColon);
+                item
+            },
 
             lexer::Eof => return None,
 
@@ -221,7 +225,10 @@ impl<'a> Parser<'a> {
         match self.next_token() {
             lexer::Ident(name) => ast::UserType(name.clone()),
             lexer::Int => ast::Primitive(ast::IntType),
+            lexer::Char => ast::Primitive(ast::CharType),
             lexer::Bool => ast::Primitive(ast::BoolType),
+            lexer::Any => ast::Primitive(ast::AnyType),
+            lexer::Star => ast::Pointer(box self.parse_type()),
 
             invalid => {
                 self.logger.report_error(format!("expected `<Type>` but found `{}`", invalid),
@@ -289,14 +296,37 @@ impl<'a> Parser<'a> {
 
     fn parse_expression(&mut self) -> ast::Expression {
         let span_start = self.current_pos();
-        match self.next_token() {
-            lexer::Ident(name) => self.handle_ident(name.to_string(), span_start.clone()),
-            lexer::LitNum(value) => self.handle_num(value, span_start.clone()),
+        let mut expression = match self.next_token() {
+            lexer::Star => {
+                let deref_target = self.parse_expression();
+                let rtype = deref_target.rtype.clone();
+                ast::Expression {
+                    expr: box ast::DerefExpr(deref_target),
+                    rtype: ast::DerefType(box rtype),
+                    span: InputSpan::new(span_start, self.current_pos()),
+                }
+            },
+            lexer::Ident(name) => self.handle_ident(name.to_string(), span_start),
+            lexer::LitNum(value) => self.handle_num(value, span_start),
+            lexer::True => {
+                ast::Expression {
+                    expr: box ast::LitNumExpr(1),
+                    rtype: ast::Primitive(ast::BoolType),
+                    span: InputSpan::new(span_start, self.current_pos()),
+                }
+            },
+            lexer::False => {
+                ast::Expression {
+                    expr: box ast::LitNumExpr(0),
+                    rtype: ast::Primitive(ast::BoolType),
+                    span: InputSpan::new(span_start, self.current_pos()),
+                }
+            },
             lexer::Minus => {
                 match self.peek() {
                     lexer::LitNum(value) => {
                         self.bump();
-                        self.handle_num(-value, span_start.clone())
+                        self.handle_num(-value, span_start)
                     },
                     _ => fail!("ICE: Cannot negate expression")
                 }
@@ -308,20 +338,29 @@ impl<'a> Parser<'a> {
                     span: InputSpan::new(span_start, self.current_pos()),
                 }
             },
-            lexer::If => self.parse_if(span_start.clone()),
+            lexer::If => self.parse_if(span_start),
             lexer::For => unimplemented!(),
-            lexer::While => self.parse_while(span_start.clone()),
-            lexer::Loop => self.parse_loop(span_start.clone()),
-            lexer::Break => self.parse_break(span_start.clone()),
-            lexer::Return => self.parse_return(span_start.clone()),
-            lexer::Asm => self.parse_asm(span_start.clone()),
+            lexer::While => self.parse_while(span_start),
+            lexer::Loop => self.parse_loop(span_start),
+            lexer::Break => self.parse_break(span_start),
+            lexer::Return => self.parse_return(span_start),
+            lexer::Asm => self.parse_asm(span_start),
             invalid => {
-                let span_end = self.current_pos();
                 self.logger.report_error(format!("expected `<Expression>` but found `{}`", invalid),
-                    InputSpan::new(span_start, span_end));
+                    InputSpan::new(span_start, self.current_pos()));
                 self.fatal_error();
             },
+        };
+
+        // Check for a type cast
+        match self.peek() {
+            lexer::As => {
+                self.bump();
+                expression.rtype = self.parse_type();
+            },
+            _ => {},
         }
+        expression
     }
 
     fn handle_ident(&mut self, name: String, span_start: InputPos) -> ast::Expression {

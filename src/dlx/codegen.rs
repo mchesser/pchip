@@ -288,7 +288,7 @@ impl<'a> CodeData<'a> {
         self.instructions.push(asm::Label(label));
 
         // Allocate and initialize the variable
-        let rtype = scope.vars[var_id].ast.var_type.clone();
+        let rtype = self.type_table[scope.vars[var_id].ast.var_type.clone()].clone();
         match scope.vars[var_id].ast.assignment {
             // Initialized variables
             Some(ref expr) => {
@@ -304,11 +304,7 @@ impl<'a> CodeData<'a> {
             },
             // Uninitialized variables
             None => {
-                let size = match rtype {
-                    ast::Primitive(t) => t.size(),
-                    _ => unimplemented!(),
-                };
-                self.instructions.push(asm::AllocateSpace(size as u32));
+                self.instructions.push(asm::AllocateSpace(rtype.size() as u32));
             }
         }
     }
@@ -385,6 +381,12 @@ impl<'a> CodeData<'a> {
     fn compile_expression(&mut self, scope: &mut Scope, expression: &ast::Expression) {
         let span = expression.span;
         match *expression.expr {
+            ast::DerefExpr(ref inner) => {
+                // Evaluate the inner expression
+                self.compile_expression(scope, inner);
+                // Then dereference it
+                self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), RESULT_REG));
+            },
             ast::IfExpr(ref inner) => self.compile_if(scope, inner),
             ast::LoopExpr(ref inner) => self.compile_loop(scope, inner),
             ast::CallExpr(ref inner) => self.compile_call(scope, inner),
@@ -581,6 +583,15 @@ impl<'a> CodeData<'a> {
     fn resolve_type(&self, scope: &Scope, type_value: &ast::Type) -> Type {
         match *type_value {
             ast::VariableType(ref name) => scope.get_ident(name, InputSpan::invalid()).rtype(),
+            ast::Pointer(ref inner) => Pointer(box self.resolve_type(scope, &**inner)),
+            ast::DerefType(ref inner) => {
+                match self.resolve_type(scope, &**inner) {
+                    Pointer(inner) => *inner,
+                    invalid => {
+                        fail!("type `{}` cannot be dereferenced", invalid);
+                    }
+                }
+            },
             ref known_type => self.type_table[known_type.clone()].clone(),
         }
     }
