@@ -119,10 +119,7 @@ struct Variable {
 }
 
 impl Variable {
-    fn new(ast: ast::LetStatement, type_table: &HashMap<ast::Type, Type>,
-        location: Location) -> Variable
-    {
-        let rtype = type_table[ast.var_type].clone();
+    fn new(ast: ast::LetStatement, rtype: Type, location: Location) -> Variable {
         Variable {
             ast: ast,
             rtype: rtype,
@@ -242,7 +239,8 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>) -> Vec<Instruc
             ast::LetItem(let_item) => {
                 let id = VarIdentId(global.vars.len());
                 global.add_ident(let_item.name.clone(), id, let_item.span.clone());
-                global.vars.push(Variable::new(let_item, &data.type_table, Label(location)));
+                let rtype = data.type_table[let_item.var_type].clone();
+                global.vars.push(Variable::new(let_item, rtype, Label(location)));
             },
         }
     }
@@ -343,8 +341,9 @@ impl<'a> CodeData<'a> {
                 assignment: None,
                 span: span.clone(),
             };
-            let var = Variable::new(var_ast, &self.type_table, Offset(next_param_addr as i16));
-            next_param_addr -= var.rtype.size();
+            let rtype = self.type_table[var_ast.var_type].clone();
+            let var = Variable::new(var_ast, rtype.clone(), Offset(next_param_addr as i16));
+            next_param_addr -= rtype.size();
 
             let id = VarIdentId(local.vars.len());
             local.add_ident(name.clone(), id, span.clone());
@@ -544,8 +543,8 @@ impl<'a> CodeData<'a> {
         let id = VarIdentId(scope.vars.len());
         scope.add_ident(let_statement.name.clone(), id, let_statement.span);
 
-        let var = Variable::new(let_statement.clone(), &self.type_table,
-            Offset(scope.next_offset));
+        let rtype = self.resolve_type(scope, &let_statement.var_type);
+        let var = Variable::new(let_statement.clone(), rtype, Offset(scope.next_offset));
         scope.next_offset += var.rtype.size() as i16;
         scope.vars.push(var);
 

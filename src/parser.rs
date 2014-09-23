@@ -169,8 +169,11 @@ impl<'a> Parser<'a> {
         let span_start = self.current_pos();
         let (name, opt_type) = self.parse_var_with_type();
 
-        let opt_assignment = match self.next_token() {
-            lexer::Assignment => Some(self.parse_assignment(name.clone())),
+        let opt_assignment = match self.peek() {
+            lexer::Assignment => {
+                self.bump();
+                Some(self.parse_assignment(name.clone()))
+            },
             lexer::SemiColon => None,
             invalid => {
                 self.logger.report_error(format!("expected `=` or `;` but found `{}`",
@@ -179,7 +182,7 @@ impl<'a> Parser<'a> {
             }
         };
 
-        // If the type wasn't specified for this variable then there needs
+        // If the type wasn't specified for this variable then there needs an assignment
         let type_ = match (&opt_type, &opt_assignment) {
             (&Some(ref t), _) => t.clone(),
             (&None, &Some(ref assignment)) => {
@@ -524,7 +527,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_asm(&mut self, span_start: InputPos) -> ast::Expression {
-        let span_start = self.current_pos();
         self.expect(lexer::LeftBrace);
 
         let mut code = String::new();
