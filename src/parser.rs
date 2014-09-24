@@ -297,12 +297,31 @@ impl<'a> Parser<'a> {
     fn parse_expression(&mut self) -> ast::Expression {
         let span_start = self.current_pos();
         let mut expression = match self.next_token() {
+            lexer::Amp => {
+                let target = self.parse_expression();
+                let rtype = ast::Pointer(box target.rtype.clone());
+                let ref_target = match *target.expr {
+                    ast::VariableExpr(var_name) => var_name,
+                    invalid => {
+                        self.logger.report_error(format!("expected `<Variable>` but found `{}`",
+                            invalid), InputSpan::new(span_start, self.current_pos()));
+                        println!("Try creating a temporary before taking a reference")
+                        self.fatal_error();
+                    },
+                };
+
+                ast::Expression {
+                    expr: box ast::RefExpr(ref_target),
+                    rtype: rtype,
+                    span: InputSpan::new(span_start, self.current_pos()),
+                }
+            },
             lexer::Star => {
                 let deref_target = self.parse_expression();
-                let rtype = deref_target.rtype.clone();
+                let rtype = ast::DerefType(box deref_target.rtype.clone());
                 ast::Expression {
                     expr: box ast::DerefExpr(deref_target),
-                    rtype: ast::DerefType(box rtype),
+                    rtype: rtype,
                     span: InputSpan::new(span_start, self.current_pos()),
                 }
             },

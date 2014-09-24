@@ -428,6 +428,32 @@ impl<'a> CodeData<'a> {
     fn compile_expression(&mut self, scope: &mut Scope, expression: &ast::Expression) {
         let span = expression.span;
         match *expression.expr {
+            ast::RefExpr(ref target) => {
+                // Get the identifier corresponding to the target
+                let target_ident = match scope.get_ident(target, span) {
+                    FnIdent(..) => {
+                        self.logger.report_error(format!("attempted to take reference to function"),
+                            span);
+                        self.fatal_error();
+                    },
+                    VarIdent(ident) => ident,
+                };
+                // Take a reference to this variable
+                match target_ident.location {
+                    Label(ref name) => {
+                        let asm = format!("        addui,r{},r{},{}", RESULT_REG, ZERO_REG, name);
+                        self.instructions.push(asm::RawAsm(asm));
+                    },
+                    Offset(offset) => {
+                        self.instructions.push(asm::AddSignedValue(RESULT_REG, STACK_POINTER,
+                            offset))
+                    },
+                    Register(..) => {
+                        fail!("ICE: Attempted to take the address of a variable in a register")
+                    },
+                }
+
+            },
             ast::DerefExpr(ref inner) => {
                 // Evaluate the inner expression
                 self.compile_expression(scope, inner);

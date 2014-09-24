@@ -66,6 +66,7 @@ pub enum Expr {
     LitNumExpr(int),
 
     // Other
+    RefExpr(String),
     DerefExpr(Expression),
     AsmOpExpr(String),
     EmptyExpr,
