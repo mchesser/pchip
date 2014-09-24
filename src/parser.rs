@@ -560,7 +560,7 @@ impl<'a> Parser<'a> {
         let rtype = expression.rtype.clone();
         ast::Expression {
             expr: box ast::Return(expression),
-            rtype: rtype,
+            rtype: ast::Primitive(ast::BottomType),
             span: InputSpan::new(span_start, self.current_pos()),
         }
     }

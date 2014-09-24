@@ -15,10 +15,41 @@ static ZERO_REG: RegId = 0;
 static FRAME_POINTER: RegId = 30;
 // Stack pointer register
 static STACK_POINTER: RegId = 14;
+// Heap pointer register
+static HEAP_POINTER: RegId = 15;
 // Return address register (set by jal)
 static RETURN_REG: RegId = 31;
 // Register used for storing the results of computations
 static RESULT_REG: RegId = 1;
+
+static DATA_SEGMENT: &'static str =
+"
+; Start of compile time data segment
+        .seg   data
+";
+
+static CODE_SEGMENT: &'static str =
+"
+; Start of code segment
+        .seg    code
+";
+
+static PROGRAM_START: &'static str =
+"
+; Allocate some dynamic memory for the program to use
+        .seg    dynamic_mem
+stack   .space  1000
+heap    .space  1000
+
+; Manually start the program
+        .seg    code
+        .start  prgsrt
+
+prgsrt  addui   r14,r0,stack            ; Give the program a stack
+        addui   r15,r0,heap             ; Give the program a heap
+        jal     fn_main                 ; Jump to the program entry point
+        halt                            ; Stop the machine
+";
 
 #[deriving(Clone)]
 struct CompositeType {
@@ -210,7 +241,9 @@ impl<'a> Scope<'a> {
     }
 }
 
-pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>) -> Vec<Instruction> {
+pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start: bool)
+    -> Vec<Instruction>
+{
     let mut global = Scope::new("exit".into_string());
     let mut data = CodeData {
         instructions: vec![],
@@ -226,30 +259,38 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>) -> Vec<Instruc
 
     // Parse globals
     for item in program.items.into_iter() {
-        let location = data.next_unique_label();
         match item {
             ast::FunctionItem(fn_item) => {
                 let id = FnIdentId(global.functions.len());
-                global.add_ident(fn_item.name.clone(), id, fn_item.span.clone());
-                global.functions.push(Function::new(fn_item, &data.type_table, location));
+                let name = fn_item.name.clone();
+                let label = name.clone();
+                global.add_ident(name, id, fn_item.span.clone());
+                global.functions.push(Function::new(fn_item, &data.type_table, label));
             },
             ast::StructItem(struct_item) => {
                 unimplemented!();
             },
             ast::LetItem(let_item) => {
                 let id = VarIdentId(global.vars.len());
-                global.add_ident(let_item.name.clone(), id, let_item.span.clone());
+                let name = let_item.name.clone();
+                let label = format!("{}{}", name, data.next_unique_id());
+                global.add_ident(name, id, let_item.span.clone());
                 let rtype = data.type_table[let_item.var_type].clone();
-                global.vars.push(Variable::new(let_item, rtype, Label(location)));
+                global.vars.push(Variable::new(let_item, rtype, Label(label)));
             },
         }
     }
 
+    data.instructions.push(asm::RawAsm(DATA_SEGMENT.to_string()));
     // Compile global variables
     for i in range(0u, global.vars.len()) {
         data.compile_global_var(&global, i);
     }
 
+    data.instructions.push(asm::RawAsm(CODE_SEGMENT.to_string()));
+    if add_prog_start {
+        data.instructions.push(asm::RawAsm(PROGRAM_START.to_string()));
+    }
     // Compile global functions
     for i in range(0u, global.functions.len()) {
         data.compile_global_fn(&global, i);
@@ -271,11 +312,14 @@ impl<'a> CodeData<'a> {
         fail!();
     }
 
-    /// Generating a unique label id, by keeping track of the number of labels generated and
-    /// appending the label count to the label.
-    fn next_unique_label(&mut self) -> LabelId {
+    /// Generating a unique label id
+    fn next_unique_id(&mut self) -> uint {
         self.label_count += 1;
-        format!("L{}", self.label_count - 1)
+        self.label_count - 1
+    }
+
+    fn anon_label(&mut self) -> LabelId {
+        format!("a{}", self.next_unique_id())
     }
 
     /// Compile a global variable
@@ -318,13 +362,13 @@ impl<'a> CodeData<'a> {
 
         // Store caller's frame pointer and set current frame pointer
         self.instructions.push(asm::Store32(asm::Const(0), STACK_POINTER, FRAME_POINTER));
-        self.instructions.push(asm::AddSigned(FRAME_POINTER, STACK_POINTER, ZERO_REG));
+        self.instructions.push(asm::AddUnsigned(FRAME_POINTER, STACK_POINTER, ZERO_REG));
 
         // Store return location (this should be done by caller)
         self.instructions.push(asm::Store32(asm::Const(4), FRAME_POINTER, RETURN_REG));
 
         // Create a local scope for this function
-        let mut local = Scope::new_with_parent(scope, self.next_unique_label());
+        let mut local = Scope::new_with_parent(scope, self.anon_label());
 
         // Register function parameters as local variables
         // The input params are stored in negative offset before the frame pointer with the last
@@ -361,15 +405,18 @@ impl<'a> CodeData<'a> {
         // Now set the amount of stack space to allocate
         let frame_size = local.next_offset;
         *self.instructions.get_mut(reserve_stack_index) =
-            asm::AddSignedValue(STACK_POINTER, STACK_POINTER, frame_size);
+            asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER, frame_size as u16);
 
         self.instructions.push(asm::Label(local.end_label.clone()));
 
         // Remove this stack frame, and return to the previous one
         self.instructions.push(asm::Load32(RETURN_REG, asm::Const(4), FRAME_POINTER));
-        self.instructions.push(asm::AddSigned(STACK_POINTER, FRAME_POINTER, ZERO_REG));
+        self.instructions.push(asm::AddUnsigned(STACK_POINTER, FRAME_POINTER, ZERO_REG));
         self.instructions.push(asm::Load32(FRAME_POINTER, asm::Const(0), STACK_POINTER));
         self.instructions.push(asm::JumpR(RETURN_REG));
+
+        // Insert a new line to make the output nicer to read
+        self.instructions.push(asm::RawAsm("".to_string()));
     }
 
     fn compile_block(&mut self, scope: &mut Scope, block: &ast::Block) {
@@ -442,9 +489,9 @@ impl<'a> CodeData<'a> {
 
         self.compile_expression(scope, &if_statement.condition);
 
-        let else_label = self.next_unique_label();
+        let else_label = self.anon_label();
         let end_label = match if_statement.else_block {
-            Some(..) => self.next_unique_label(),
+            Some(..) => self.anon_label(),
             // If there is no else block, then the end label is equal to the else label
             None => else_label.clone(),
         };
@@ -485,11 +532,11 @@ impl<'a> CodeData<'a> {
         let body_rtype = self.resolve_type(scope, &loop_statement.body.rtype());
         self.check_type(&body_rtype, &Unit);
 
-        let start_label = self.next_unique_label();
+        let start_label = self.anon_label();
         self.instructions.push(asm::Label(start_label.clone()));
 
         // Add the end label to the loop ends vector, so that it can be used by breaks
-        let end_label = self.next_unique_label();
+        let end_label = self.anon_label();
         scope.loop_ends.push(end_label.clone());
 
         self.compile_block(scope, &loop_statement.body);
@@ -513,10 +560,12 @@ impl<'a> CodeData<'a> {
             // Compile the expression
             self.compile_expression(scope, arg);
             // Write the result of the expression to the stack
-            self.instructions.push(asm::Store32(asm::Const(0), STACK_POINTER, RESULT_REG));
-            self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER, 4));
-            stack_offset += arg_size;
+            self.instructions.push(asm::Store32(asm::Const(stack_offset), STACK_POINTER,
+                RESULT_REG));
+            stack_offset += arg_size as i16;
         }
+        self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER,
+            stack_offset as u16));
 
         // Get the function corresponding to the call
         let function = match scope.get_ident(&call.name, call.span.clone()) {

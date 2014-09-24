@@ -3,6 +3,8 @@
 use std::io::File;
 use std::os;
 
+use std::cmp::min;
+
 use parser::parse;
 use lexer::Lexer;
 use error::Logger;
@@ -31,7 +33,7 @@ fn main() {
 
     let logger = Logger::new(input.as_slice(), true);
     let program = parse(Lexer::new(input.as_slice()), &logger);
-    let code = codegen(program, &logger);
+    let code = codegen(program, &logger, true);
 
     let mut space = 0;
     let mut program_string = String::new();
@@ -51,7 +53,7 @@ fn main() {
             },
             other => {
                 let data = other.into_string();
-                program_string.grow(8 - space, ' ');
+                program_string.grow(8 - min(7, space), ' ');
                 program_string.push_str(data.as_slice());
                 program_string.push_char('\n');
                 space = 0;
