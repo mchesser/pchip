@@ -54,6 +54,7 @@ pub struct Expression {
 pub enum Expr {
     // Control flow
     IfExpr(IfStatement),
+    ForLoopExpr(ForLoopStatement),
     LoopExpr(LoopStatement),
     CallExpr(FunctionCall),
     Break,
@@ -97,6 +98,15 @@ pub struct IfStatement {
 
 #[deriving(Show, Clone)]
 pub struct LoopStatement {
+    pub body: Block,
+    pub span: InputSpan,
+}
+
+#[deriving(Show, Clone)]
+pub struct ForLoopStatement {
+    pub loop_var: String,
+    pub start: Expression,
+    pub end: Expression,
     pub body: Block,
     pub span: InputSpan,
 }

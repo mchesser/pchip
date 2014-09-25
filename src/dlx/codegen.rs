@@ -464,6 +464,7 @@ impl<'a> CodeData<'a> {
                 self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), RESULT_REG));
             },
             ast::IfExpr(ref inner) => self.compile_if(scope, inner),
+            ast::ForLoopExpr(ref inner) => self.compile_for(scope, inner),
             ast::LoopExpr(ref inner) => self.compile_loop(scope, inner),
             ast::CallExpr(ref inner) => self.compile_call(scope, inner),
             ast::Break => {
@@ -553,6 +554,85 @@ impl<'a> CodeData<'a> {
 
         // Add the end label
         self.instructions.push(asm::Label(end_label));
+    }
+
+    /// Compile a for loop:
+    /// Note: We directly compile for loops instead of de-sugaring them into a normal loop with an
+    /// if break, for efficiency.
+    fn compile_for(&mut self, scope: &mut Scope, for_statement: &ast::ForLoopStatement) {
+        // Check that the body of the loop returns the correct type
+        let body_rtype = self.resolve_type(scope, &for_statement.body.rtype());
+        self.check_type(&body_rtype, &Unit, for_statement.span.clone());
+
+        // Check that the start expression has the correct type
+        let start_type = self.resolve_type(scope, &for_statement.start.rtype);
+        self.check_type(&start_type, &Int, for_statement.start.span.clone());
+        // Compile the expression for the range start
+        self.compile_expression(scope, &for_statement.start);
+        // Write the start expression to the stack
+        self.instructions.push(asm::Store32(asm::Const(0), STACK_POINTER, RESULT_REG));
+
+        // Check that the end expression has the correct type
+        let end_type = self.resolve_type(scope, &for_statement.end.rtype);
+        self.check_type(&end_type, &Int, for_statement.end.span.clone());
+        // Compile the expression for the range end
+        self.compile_expression(scope, &for_statement.end);
+        // Write the end expression to the stack
+        self.instructions.push(asm::Store32(asm::Const(Int.size() as i16), STACK_POINTER,
+            RESULT_REG));
+
+        // Increment the stack
+        self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER,
+            Int.size() as u16 * 2));
+
+        // Create a fake ast so the we can refer to the variable inside the loop
+        let loop_var_name = for_statement.loop_var.clone();
+        let loop_var_ast = ast::LetStatement {
+            name: loop_var_name.clone(),
+            var_type: ast::Primitive(ast::IntType),
+            assignment: None,
+            span: for_statement.span.clone(),
+        };
+        let loop_var = Variable::new(loop_var_ast, Int, Offset(scope.next_offset));
+        scope.next_offset += Int.size() as i16;
+
+        let id = VarIdentId(scope.vars.len());
+        scope.add_ident(loop_var_name, id, for_statement.span.clone());
+        scope.vars.push(loop_var);
+
+        let start_label = self.anon_label();
+        let cond_label = self.anon_label();
+        let end_label = self.anon_label();
+        scope.loop_ends.push(end_label.clone());
+
+        // Check the condition before we start by jumping to the condition label
+        self.instructions.push(asm::Load32(RESULT_REG, asm::Const(-8), STACK_POINTER));
+        self.instructions.push(asm::Jump(cond_label.clone()));
+
+        // Compile the main body of the loop
+        self.instructions.push(asm::Label(start_label.clone()));
+        self.compile_block(scope, &for_statement.body);
+
+        // Increment the loop variable
+        self.instructions.push(asm::Load32(RESULT_REG, asm::Const(-8), STACK_POINTER));
+        self.instructions.push(asm::AddUnsignedValue(RESULT_REG, RESULT_REG, 1));
+        self.instructions.push(asm::Store32(asm::Const(-8), STACK_POINTER, RESULT_REG));
+
+        // Jump back to the start if we haven't finished the loop.
+        // Note: The loop variable will be already loaded into RESULT_REG
+        self.instructions.push(asm::Label(cond_label));
+        self.instructions.push(asm::Load32(TEMP_REG, asm::Const(-4), STACK_POINTER));
+        self.instructions.push(asm::SetLt(RESULT_REG, RESULT_REG, TEMP_REG));
+        self.instructions.push(asm::JumpIfNotZero(RESULT_REG, start_label));
+
+        // Add end label
+        let end_label = scope.loop_ends.pop().expect("ICE: Missing label after loop");
+        self.instructions.push(asm::Label(end_label));
+
+        // Restore the stack
+        self.instructions.push(asm::SubUnsignedValue(STACK_POINTER, STACK_POINTER,
+            Int.size() as u16 * 2));
+        scope.next_offset -= Int.size() as i16;
     }
 
     fn compile_loop(&mut self, scope: &mut Scope, loop_statement: &ast::LoopStatement) {

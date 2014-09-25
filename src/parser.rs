@@ -398,7 +398,7 @@ impl<'a> Parser<'a> {
                 }
             },
             lexer::If => self.parse_if(span_start),
-            lexer::For => unimplemented!(),
+            lexer::For => self.parse_for(span_start),
             lexer::While => self.parse_while(span_start),
             lexer::Loop => self.parse_loop(span_start),
             lexer::Break => self.parse_break(span_start),
@@ -507,6 +507,8 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parse an if statement defined by:
+    ///     <IfStatement> = if <Expression> <Block>
     fn parse_if(&mut self, span_start: InputPos) -> ast::Expression {
         let condition = self.parse_expression();
         let body = self.parse_block();
@@ -534,11 +536,56 @@ impl<'a> Parser<'a> {
             span: InputSpan::new(span_start, self.current_pos()),
         };
 
+        // The return type of the if statement is the return type of the body. We check that the
+        // the else part matches during compile time.
         let rtype = if_statement.body.rtype();
-
         ast::Expression {
             expr: box ast::IfExpr(if_statement),
             rtype: rtype,
+            span: InputSpan::new(span_start, self.current_pos()),
+        }
+    }
+
+    /// Parse a for statement defined by:
+    ///     for <Ident> in range(<Expression>, <Expression>) <Block>
+    fn parse_for(&mut self, span_start: InputPos) -> ast::Expression {
+        let loop_var = match self.next_token() {
+            lexer::Ident(name) => name,
+            invalid => {
+                self.logger.report_error(format!("expected `<Ident>` but found `{}`", invalid),
+                    InputSpan::new(span_start, self.current_pos()));
+                self.fatal_error();
+            },
+        };
+
+        // At the moment the syntax for `for` expressions is very restrictive, however this can
+        // be changed in the future.
+        self.expect(lexer::In);
+        self.expect(lexer::Range);
+        self.expect(lexer::LeftParen);
+        let start = self.parse_expression();
+        self.expect(lexer::Comma);
+        let end = self.parse_expression();
+        self.expect(lexer::RightParen);
+
+        let body = self.parse_block();
+
+        // Insert an implicit semicolon if there wasn't one at the end of the for statement
+        if self.peek() != lexer::SemiColon {
+            self.fake_semicolon = true;
+        }
+
+        let for_statement = ast::ForLoopStatement {
+            loop_var: loop_var,
+            start: start,
+            end: end,
+            body: body,
+            span: InputSpan::new(span_start, self.current_pos()),
+        };
+
+        ast::Expression {
+            expr: box ast::ForLoopExpr(for_statement),
+            rtype: ast::Primitive(ast::UnitType),
             span: InputSpan::new(span_start, self.current_pos()),
         }
     }
