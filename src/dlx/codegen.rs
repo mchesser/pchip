@@ -21,11 +21,13 @@ static HEAP_POINTER: RegId = 15;
 static RETURN_REG: RegId = 31;
 // Register used for storing the results of computations
 static RESULT_REG: RegId = 1;
+// Register used for temporary values
+static TEMP_REG: RegId = 2;
 
 static DATA_SEGMENT: &'static str =
 "
 ; Start of compile time data segment
-        .seg   data
+        .seg    data
 ";
 
 static CODE_SEGMENT: &'static str =
@@ -47,7 +49,7 @@ heap    .space  1000
 
 prgsrt  addui   r14,r0,stack            ; Give the program a stack
         addui   r15,r0,heap             ; Give the program a heap
-        jal     fn_main                 ; Jump to the program entry point
+        jal     main                    ; Jump to the program entry point
         halt                            ; Stop the machine
 ";
 
@@ -122,11 +124,11 @@ struct Function {
 }
 
 impl Function {
-    fn new(ast: ast::FunctionDeclaration, type_table: &HashMap<ast::Type, Type>,
+    fn new(ast: ast::FunctionDeclaration, code_data: &CodeData, scope: &Scope,
         location: LabelId) -> Function
     {
-        let arg_types = ast.params.iter().map(|param| type_table[param.1].clone()).collect();
-        let rtype = type_table[ast.rtype].clone();
+        let arg_types = ast.params.iter().map(|p| code_data.resolve_type(scope, &p.1)).collect();
+        let rtype = code_data.resolve_type(scope, &ast.rtype);
         Function {
             ast: ast,
             arg_types: arg_types,
@@ -265,7 +267,8 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start
                 let name = fn_item.name.clone();
                 let label = name.clone();
                 global.add_ident(name, id, fn_item.span.clone());
-                global.functions.push(Function::new(fn_item, &data.type_table, label));
+                let function = Function::new(fn_item, &data, &global, label);
+                global.functions.push(function);
             },
             ast::StructItem(struct_item) => {
                 unimplemented!();
@@ -336,7 +339,7 @@ impl<'a> CodeData<'a> {
         match scope.vars[var_id].ast.assignment {
             // Initialized variables
             Some(ref expr) => {
-                match *expr.expression.expr {
+                match *expr.rhs.expr {
                     // For now global vars can only be words
                     ast::LitNumExpr(n) => {
                         self.instructions.push(asm::AllocateWords(vec![n as i32]));
@@ -381,9 +384,9 @@ impl<'a> CodeData<'a> {
                 assignment: None,
                 span: span.clone(),
             };
-            let rtype = self.type_table[var_ast.var_type].clone();
-            let var = Variable::new(var_ast, rtype.clone(), Offset(next_param_addr as i16));
+            let rtype = self.resolve_type(scope, &var_ast.var_type);
             next_param_addr -= rtype.size();
+            let var = Variable::new(var_ast, rtype, Offset(next_param_addr as i16));
 
             let id = VarIdentId(local.vars.len());
             local.add_ident(name.clone(), id, span.clone());
@@ -445,7 +448,7 @@ impl<'a> CodeData<'a> {
                         self.instructions.push(asm::RawAsm(asm));
                     },
                     Offset(offset) => {
-                        self.instructions.push(asm::AddSignedValue(RESULT_REG, STACK_POINTER,
+                        self.instructions.push(asm::AddSignedValue(RESULT_REG, FRAME_POINTER,
                             offset))
                     },
                     Register(..) => {
@@ -511,7 +514,7 @@ impl<'a> CodeData<'a> {
     fn compile_if(&mut self, scope: &mut Scope, if_statement: &ast::IfStatement) {
         // Check that the expression returns a boolean type
         let cond_type = self.resolve_type(scope, &if_statement.condition.rtype);
-        self.check_type(&cond_type, &Bool);
+        self.check_type(&cond_type, &Bool, if_statement.span.clone());
 
         self.compile_expression(scope, &if_statement.condition);
 
@@ -524,7 +527,6 @@ impl<'a> CodeData<'a> {
 
         self.instructions.push(asm::JumpIfZero(RESULT_REG, else_label.clone()));
 
-
         // Compile the then block
         self.compile_block(scope, &if_statement.body);
         let then_rtype = self.resolve_type(scope, &if_statement.body.rtype());
@@ -533,7 +535,7 @@ impl<'a> CodeData<'a> {
             Some(ref block) => {
                 // Check that both sides return the same type
                 let else_rtype = self.resolve_type(scope, &block.rtype());
-                self.check_type(&else_rtype, &then_rtype);
+                self.check_type(&else_rtype, &then_rtype, block.span.clone());
 
                 // If there is an else block we need to add a jump from the then block to the
                 // end label, and add a label for the else part
@@ -545,7 +547,7 @@ impl<'a> CodeData<'a> {
             None => {
                 // If the else block was left unspecified, then the if statement must return the
                 // unit type
-                self.check_type(&then_rtype, &Unit);
+                self.check_type(&then_rtype, &Unit, if_statement.span.clone());
             }
         }
 
@@ -556,7 +558,7 @@ impl<'a> CodeData<'a> {
     fn compile_loop(&mut self, scope: &mut Scope, loop_statement: &ast::LoopStatement) {
         // Check that the body of the loop returns the correct type
         let body_rtype = self.resolve_type(scope, &loop_statement.body.rtype());
-        self.check_type(&body_rtype, &Unit);
+        self.check_type(&body_rtype, &Unit, loop_statement.span.clone());
 
         let start_label = self.anon_label();
         self.instructions.push(asm::Label(start_label.clone()));
@@ -577,6 +579,7 @@ impl<'a> CodeData<'a> {
 
     fn compile_call(&mut self, scope: &mut Scope, call: &ast::FunctionCall) {
         let mut call_args = vec![];
+        // Keep track of the offset of the stack, so that we can restore it later.
         let mut stack_offset = 0;
         for arg in call.args.iter() {
             let arg_type = self.resolve_type(scope, &arg.rtype);
@@ -586,12 +589,12 @@ impl<'a> CodeData<'a> {
             // Compile the expression
             self.compile_expression(scope, arg);
             // Write the result of the expression to the stack
-            self.instructions.push(asm::Store32(asm::Const(stack_offset), STACK_POINTER,
-                RESULT_REG));
+            self.instructions.push(asm::Store32(asm::Const(0), STACK_POINTER, RESULT_REG));
+            // Increment the stack
+            self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER,
+                arg_size as u16));
             stack_offset += arg_size as i16;
         }
-        self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER,
-            stack_offset as u16));
 
         // Get the function corresponding to the call
         let function = match scope.get_ident(&call.name, call.span.clone()) {
@@ -604,7 +607,7 @@ impl<'a> CodeData<'a> {
             fail!("INCORRECT NUMBER OF ARGUMENTS");
         }
         for (call_arg, fn_arg) in call_args.iter().zip(function.arg_types.iter()) {
-            self.check_type(call_arg, fn_arg);
+            self.check_type(call_arg, fn_arg, call.span.clone());
         }
 
         // Make the call
@@ -633,23 +636,45 @@ impl<'a> CodeData<'a> {
     }
 
     fn compile_assign(&mut self, scope: &mut Scope, assignment: &ast::Assignment) {
-        // Check if the name resolves
-        let target_location =  match scope.get_ident(&assignment.target, assignment.span.clone()) {
-            VarIdent(ident) => ident.location.clone(),
-            FnIdent(..) => fail!("EXPECTED_VAR_FOUND_FUNCTION_ERROR, TODO: Improve this error"),
-        };
+        // Check that the rhs result matches the target
+        self.check_type(&self.resolve_type(scope, &assignment.rhs.rtype),
+            &self.resolve_type(scope, &assignment.target.rtype), assignment.span.clone());
 
-        // Compile the expression and store the result in the location found
-        self.compile_expression(scope, &assignment.expression);
-        match target_location {
-            Label(label) => {
-                self.instructions.push(asm::Store32(asm::Unknown(label), ZERO_REG, RESULT_REG));
+        // Compile the rhs expression and store the result in the location found
+        self.compile_expression(scope, &assignment.rhs);
+
+        let target_span = assignment.target.span.clone();
+        match *assignment.target.expr {
+            // Assignment to an ordinary variable
+            ast::VariableExpr(ref name) => {
+                match self.get_var_location(scope, name, target_span) {
+                    Label(label) => {
+                        self.instructions.push(asm::Store32(asm::Unknown(label), ZERO_REG,
+                            RESULT_REG));
+                    },
+                    Offset(amount) => {
+                        self.instructions.push(asm::Store32(asm::Const(amount), FRAME_POINTER,
+                            RESULT_REG));
+                    },
+                    Register(id) => {
+                        self.instructions.push(asm::AddSigned(id, RESULT_REG, ZERO_REG));
+                    },
+                }
+            }
+            // Assignment to a dereference of a pointer
+            ast::DerefExpr(ref inner) => {
+                // Store the result from evaluating the RHS in a temp register
+                self.instructions.push(asm::AddSigned(TEMP_REG, RESULT_REG, ZERO_REG));
+                // Evaluate the target address
+                self.compile_expression(scope, inner);
+                // Then copy the result to the location that was dereferenced
+                self.instructions.push(asm::Store32(asm::Const(0), RESULT_REG, TEMP_REG));
             },
-            Offset(amount) => {
-                self.instructions.push(asm::Store32(asm::Const(amount), FRAME_POINTER, RESULT_REG));
-            },
-            Register(id) => {
-                self.instructions.push(asm::AddSigned(id, RESULT_REG, ZERO_REG));
+
+            _ => {
+                self.logger.report_error(format!("illegal left-hand side expression"),
+                    assignment.target.span.clone());
+                self.fatal_error();
             },
         }
     }
@@ -672,9 +697,18 @@ impl<'a> CodeData<'a> {
     }
 
     /// Check that a type is the same as the expected type or one path never returns
-    fn check_type(&self, input: &Type, expected: &Type) {
+    fn check_type(&self, input: &Type, expected: &Type, span: InputSpan) {
         if input != &BottomType && expected != &BottomType && input != expected {
-            fail!("INCORRECT TYPE expected: {}, found: {}", expected, input);
+            self.logger.report_error(format!("incorrect type, expected: {}, found: {}",
+                expected, input), span);
+            self.fatal_error();
+        }
+    }
+
+    fn get_var_location(&self, scope: &Scope, name: &String, span: InputSpan) -> Location {
+        match scope.get_ident(name, span) {
+            VarIdent(ident) => ident.location.clone(),
+            FnIdent(..) => fail!("EXPECTED_VAR_FOUND_FUNCTION_ERROR, TODO: Improve this error"),
         }
     }
 }

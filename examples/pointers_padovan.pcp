@@ -30,54 +30,44 @@ fn less_than_eq(a: int, b: int) -> bool {
     }
 }
 
-# Compute the nth padovan number iteratively
+# Compute the nth padovan number recursively
 fn pad(n: int) -> int {
-    if less_than(n, 0) {
-        return -1;
+    if less_than(n, 3) {
+        return 1;
     }
-    
-    let n_m1 = 1;
-    let n_m2 = 1;
-    let n_m3 = 1;
-    
-    let i = 2;
-    let result = 1;
-    
-    while less_than(i, n) {
-        result = add(n_m3, n_m2);
-        n_m3 = n_m2;
-        n_m2 = n_m1;
-        n_m1 = result;
-        i = add(i, 1);
-    }
-    
-    result  
+
+    add(pad(sub(n, 2)), pad(sub(n, 3)))
 }
 
 # Compute the sum of all padovan numbers up to n
-fn padSum(low: int, high: int, step: int) -> int {
-    if less_than(low, 0) {
+fn padSum(low: *int, high: *int, step: *int) -> int {
+    if less_than(*low, 0) {
         return -1;
     }
-    if less_than(high, low) {
+    if less_than(*high, *low) {
         return -1;
     }
-    if less_than(step, 1) {
+    if less_than(*step, 1) {
         return -1;
     }
     
-    let i = low;
+    let i = *low;
     let result = 0;
-    while less_than_eq(i, high) {
-        result = add(result, pad(i));
-        i = add(i, step);
+    let result_ptr = &result;
+    while less_than_eq(i, *high) {
+        *result_ptr = add(*result_ptr, pad(i));
+        i = add(i, *step);
     }
     
-    result
+    *result_ptr
 }
 
-let final_result = 0;
-
 fn main() {
-    final_result = padSum(2, 11, 2);
+    let low = 2;
+    let high = 11;
+    let step = 2;
+    
+    let result = padSum(&low, &high, &step);
+    let result_ptr = &result;
+    *result_ptr
 }

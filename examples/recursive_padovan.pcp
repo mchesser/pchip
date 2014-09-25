@@ -24,7 +24,7 @@ fn less_than(a: int, b: int) -> bool {
 
 # Compute the nth padovan number recursively
 fn pad(n: int) -> int {
-    if less_than(n, 4) {
+    if less_than(n, 3) {
         return 1;
     }
 

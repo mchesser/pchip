@@ -134,7 +134,7 @@ pub struct LetStatement {
 
 #[deriving(Show, Clone)]
 pub struct Assignment {
-    pub target: String,
-    pub expression: Expression,
+    pub target: Expression,
+    pub rhs: Expression,
     pub span: InputSpan,
 }

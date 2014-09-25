@@ -176,7 +176,24 @@ impl<'a> Parser<'a> {
         let opt_assignment = match self.peek() {
             lexer::Assignment => {
                 self.bump();
-                Some(self.parse_assignment(name.clone()))
+
+                let target_span = InputSpan::new(span_start, self.current_pos());
+                let rhs = self.parse_expression();
+
+                let target = ast::Expression {
+                    expr: box ast::VariableExpr(name.clone()),
+                    // Note: We should check that this type matches the specified type
+                    rtype: rhs.rtype.clone(),
+                    span: target_span,
+                };
+
+                Some(
+                    ast::Assignment {
+                        target: target,
+                        rhs: rhs,
+                        span: InputSpan::new(span_start, self.current_pos()),
+                    }
+                )
             },
             lexer::SemiColon => None,
             invalid => {
@@ -190,7 +207,7 @@ impl<'a> Parser<'a> {
         let type_ = match (&opt_type, &opt_assignment) {
             (&Some(ref t), _) => t.clone(),
             (&None, &Some(ref assignment)) => {
-                assignment.expression.rtype.clone()
+                assignment.rhs.rtype.clone()
             },
             (&None, &None) => {
                 self.logger.report_error(format!("could not determine type for variable `{}`",
@@ -294,6 +311,19 @@ impl<'a> Parser<'a> {
         }
     }
 
+
+    /// Parse an expression defined by the following grammar:
+    ///     Expression = *<Expression> | &<Expression> | -<Expression> |
+    ///                   <Variable> | <Call> | <LetStatement> | <IfStatement> | <WhileStatement>
+    ///                   <ForStatement> | <LoopStatement> | <AsmStatement> |
+    ///                   true | false | Number | break | return <Expression>
+    /// FIXME: Unfortunately this function does not work well with order of operations. At the
+    /// moment there are special hacks to ensure that assignment and dereferencing work well
+    /// together.
+    /// Plans:
+    ///  - Split the parsing up according to order of operations
+    ///  - Add infix operator support
+    ///  - Allow block expressions
     fn parse_expression(&mut self) -> ast::Expression {
         let span_start = self.current_pos();
         let mut expression = match self.next_token() {
@@ -317,7 +347,17 @@ impl<'a> Parser<'a> {
                 }
             },
             lexer::Star => {
-                let deref_target = self.parse_expression();
+                // FIXME: You should be able to dereference an arbitrary expression not just an
+                // identifier.
+                let deref_target = match self.next_token() {
+                    lexer::Ident(name) => self.handle_ident(name.to_string(), span_start),
+                    invalid => {
+                        self.logger.report_error(format!("expected `<Ident>` but found `{}`",
+                            invalid), InputSpan::new(span_start, self.current_pos()));
+                        println!("ICE: FIXME, allow arbitrary expression dereferencing")
+                        self.fatal_error();
+                    },
+                };
                 let rtype = ast::DerefType(box deref_target.rtype.clone());
                 ast::Expression {
                     expr: box ast::DerefExpr(deref_target),
@@ -371,12 +411,35 @@ impl<'a> Parser<'a> {
             },
         };
 
-        // Check for a type cast
+        // Handle type casts and infix operators
         match self.peek() {
+            // Type cast
             lexer::As => {
                 self.bump();
                 expression.rtype = self.parse_type();
             },
+
+            // Infix operators
+            lexer::Assignment => {
+                self.bump();
+                let rhs = self.parse_expression();
+                let assignment = ast::Assignment {
+                    target: expression,
+                    rhs: rhs,
+                    span: InputSpan::new(span_start, self.current_pos()),
+                };
+                expression = ast::Expression {
+                    expr: box ast::AssignExpr(assignment),
+                    rtype: ast::Primitive(ast::UnitType),
+                    span: InputSpan::new(span_start, self.current_pos()),
+                };
+            },
+
+            lexer::Plus => unimplemented!(),
+            lexer::Minus => unimplemented!(),
+            lexer::PlusEq => unimplemented!(),
+            lexer::MinusEq => unimplemented!(),
+
             _ => {},
         }
         expression
@@ -389,19 +452,8 @@ impl<'a> Parser<'a> {
                 self.parse_call(name, span_start)
             },
 
-            lexer::Assignment => {
-                self.bump();
-                ast::Expression {
-                    expr: box ast::AssignExpr(self.parse_assignment(name)),
-                    rtype: ast::Primitive(ast::UnitType),
-                    span: InputSpan::new(span_start, self.current_pos()),
-                }
-            }
-
-            lexer::Plus => unimplemented!(),
-            lexer::Minus => unimplemented!(),
-            lexer::PlusEq => unimplemented!(),
-            lexer::MinusEq => unimplemented!(),
+            lexer::LeftBracket => unimplemented!(),
+            lexer::Dot => unimplemented!(),
 
             _ => {
                 ast::Expression {
@@ -443,15 +495,6 @@ impl<'a> Parser<'a> {
         ast::Expression {
             expr: box ast::CallExpr(function_call),
             rtype: ast::VariableType(name),
-            span: InputSpan::new(span_start, self.current_pos()),
-        }
-    }
-
-    fn parse_assignment(&mut self, target: String) -> ast::Assignment {
-        let span_start = self.current_pos();
-        ast::Assignment {
-            target: target,
-            expression: self.parse_expression(),
             span: InputSpan::new(span_start, self.current_pos()),
         }
     }
@@ -576,7 +619,6 @@ impl<'a> Parser<'a> {
 
     fn parse_return(&mut self, span_start: InputPos) -> ast::Expression {
         let expression = self.parse_expression();
-        let rtype = expression.rtype.clone();
         ast::Expression {
             expr: box ast::Return(expression),
             rtype: ast::Primitive(ast::BottomType),

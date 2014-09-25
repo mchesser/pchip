@@ -1,9 +1,16 @@
 use std::iter::range_inclusive;
+use std::fmt;
 
-#[deriving(Show, Clone)]
+#[deriving(Clone)]
 pub struct InputSpan {
     pub start: InputPos,
     pub end: InputPos,
+}
+
+impl fmt::Show for InputSpan {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "\n")
+    }
 }
 
 impl InputSpan {
