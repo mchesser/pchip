@@ -6,8 +6,14 @@ use ast;
 use dlx::asm;
 use dlx::asm::{RegId, LabelId};
 use dlx::asm::Instruction;
+use dlx::types;
+use dlx::types::{Type, TypeTable};
 
 use error::{InputPos, InputSpan, Logger};
+
+static INT_TYPE: &'static Type = &types::Normal(0);
+static BOOL_TYPE: &'static Type = &types::Normal(1);
+static UNIT_TYPE: &'static Type = &types::Normal(2);
 
 // Special register that is always 0
 static ZERO_REG: RegId = 0;
@@ -53,68 +59,6 @@ prgsrt  addui   r14,r0,stack            ; Give the program a stack
         halt                            ; Stop the machine
 ";
 
-#[deriving(Clone)]
-struct CompositeType {
-    name: String,
-    fields: HashMap<String, (u32, Type)>,
-    size: u32,
-}
-
-impl PartialEq for CompositeType {
-    fn eq(&self, other: &CompositeType) -> bool {
-        // No two unique types can have the same name, so it is sufficient just to compare the
-        // names of the types to see if they are the same
-        self.name == other.name
-    }
-}
-
-impl fmt::Show for CompositeType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.name)
-    }
-}
-
-/// A resolved type
-#[deriving(Clone, PartialEq)]
-enum Type {
-    Bool,
-    Int,
-    Unit,
-    BottomType,
-    Array(Box<Type>, u32),
-    Pointer(Box<Type>),
-    Composite(Box<CompositeType>),
-}
-
-impl Type {
-    /// Returns the size of the type.
-    /// Currently all types must be word aligned.
-    fn size(&self) -> u32 {
-        match *self {
-            Bool => 4,
-            Int => 4,
-            Unit => 0,
-            BottomType => 0,
-            Array(ref tp, amount) => tp.size() * amount,
-            Pointer(..) => 4,
-            Composite(ref tp) => tp.size,
-        }
-    }
-}
-
-impl fmt::Show for Type {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            Bool => write!(f, "bool"),
-            Int => write!(f, "int"),
-            Unit => write!(f, "()"),
-            BottomType => write!(f, "!"),
-            Array(ref tp, size) => write!(f, "[{}, ..{}]", tp, size),
-            Pointer(ref tp) => write!(f, "*{}", tp),
-            Composite(ref tp) => write!(f, "{}", tp),
-        }
-    }
-}
 
 struct Function {
     ast: ast::FunctionDeclaration,
@@ -124,11 +68,12 @@ struct Function {
 }
 
 impl Function {
-    fn new(ast: ast::FunctionDeclaration, code_data: &CodeData, scope: &Scope,
+    fn new(ast: ast::FunctionDeclaration, type_table: &TypeTable, scope: &Scope,
         location: LabelId) -> Function
     {
-        let arg_types = ast.params.iter().map(|p| code_data.resolve_type(scope, &p.1)).collect();
-        let rtype = code_data.resolve_type(scope, &ast.rtype);
+        let arg_types = ast.params.iter().map(|p| type_table.resolve_type(scope, &p.1))
+            .collect();
+        let rtype = type_table.resolve_type(scope, &ast.rtype);
         Function {
             ast: ast,
             arg_types: arg_types,
@@ -173,7 +118,7 @@ enum Ident<'a> {
 }
 
 impl<'a> Ident<'a> {
-    fn rtype(&self) -> Type {
+    pub fn rtype(&self) -> Type {
         match *self {
             FnIdent(func) => func.rtype.clone(),
             VarIdent(var) => var.rtype.clone(),
@@ -181,7 +126,7 @@ impl<'a> Ident<'a> {
     }
 }
 
-struct Scope<'a> {
+pub struct Scope<'a> {
     functions: Vec<Function>,
     vars: Vec<Variable>,
     next_offset: i16,
@@ -192,7 +137,7 @@ struct Scope<'a> {
 }
 
 impl<'a> Scope<'a> {
-    fn new(end_label: LabelId) -> Scope<'a> {
+    pub fn new(end_label: LabelId) -> Scope<'a> {
         Scope {
             functions: vec![],
             vars: vec![],
@@ -223,7 +168,7 @@ impl<'a> Scope<'a> {
     }
 
     /// Get the identifier corresponding to an identifier name.
-    fn get_ident(&self, ident_name: &String, span: InputSpan) -> Ident {
+    pub fn get_ident(&self, ident_name: &String, span: InputSpan) -> Ident {
         match self.ident_table.find(ident_name) {
             Some(&FnIdentId(id)) => FnIdent(&self.functions[id]),
             Some(&VarIdentId(id)) => VarIdent(&self.vars[id]),
@@ -249,15 +194,10 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start
     let mut global = Scope::new("exit".into_string());
     let mut data = CodeData {
         instructions: vec![],
-        type_table: HashMap::new(),
+        type_table: types::typegen(&program),
         label_count: 0,
         logger: logger,
     };
-
-    data.type_table.insert(ast::Primitive(ast::IntType), Int);
-    data.type_table.insert(ast::Primitive(ast::BoolType), Bool);
-    data.type_table.insert(ast::Primitive(ast::UnitType), Unit);
-    data.type_table.insert(ast::Primitive(ast::BottomType), BottomType);
 
     // Parse globals
     for item in program.items.into_iter() {
@@ -267,20 +207,20 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start
                 let name = fn_item.name.clone();
                 let label = name.clone();
                 global.add_ident(name, id, fn_item.span.clone());
-                let function = Function::new(fn_item, &data, &global, label);
+                let function = Function::new(fn_item, &data.type_table, &global, label);
                 global.functions.push(function);
-            },
-            ast::StructItem(struct_item) => {
-                unimplemented!();
             },
             ast::LetItem(let_item) => {
                 let id = VarIdentId(global.vars.len());
                 let name = let_item.name.clone();
                 let label = format!("{}{}", name, data.next_unique_id());
                 global.add_ident(name, id, let_item.span.clone());
-                let rtype = data.type_table[let_item.var_type].clone();
+                let rtype = data.resolve_type(&global, &let_item.var_type);
                 global.vars.push(Variable::new(let_item, rtype, Label(label)));
             },
+
+            // Handled by type gen
+            ast::StructItem(..) => {},
         }
     }
 
@@ -304,7 +244,7 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start
 
 struct CodeData<'a> {
     instructions: Vec<Instruction>,
-    type_table: HashMap<ast::Type, Type>,
+    type_table: TypeTable,
     label_count: uint,
     logger: &'a Logger<'a>,
 }
@@ -335,7 +275,7 @@ impl<'a> CodeData<'a> {
         self.instructions.push(asm::Label(label));
 
         // Allocate and initialize the variable
-        let rtype = self.type_table[scope.vars[var_id].ast.var_type.clone()].clone();
+        let rtype = self.resolve_type(scope, &scope.vars[var_id].ast.var_type);
         match scope.vars[var_id].ast.assignment {
             // Initialized variables
             Some(ref expr) => {
@@ -351,7 +291,8 @@ impl<'a> CodeData<'a> {
             },
             // Uninitialized variables
             None => {
-                self.instructions.push(asm::AllocateSpace(rtype.size() as u32));
+                let size = self.size_of(&rtype) as u32;
+                self.instructions.push(asm::AllocateSpace(size));
             }
         }
     }
@@ -385,7 +326,7 @@ impl<'a> CodeData<'a> {
                 span: span.clone(),
             };
             let rtype = self.resolve_type(scope, &var_ast.var_type);
-            next_param_addr -= rtype.size();
+            next_param_addr -= self.size_of(&rtype);
             let var = Variable::new(var_ast, rtype, Offset(next_param_addr as i16));
 
             let id = VarIdentId(local.vars.len());
@@ -463,6 +404,7 @@ impl<'a> CodeData<'a> {
                 // Then dereference it
                 self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), RESULT_REG));
             },
+            ast::FieldExpr(ref inner) => unimplemented!(),
             ast::IfExpr(ref inner) => self.compile_if(scope, inner),
             ast::ForLoopExpr(ref inner) => self.compile_for(scope, inner),
             ast::LoopExpr(ref inner) => self.compile_loop(scope, inner),
@@ -502,6 +444,9 @@ impl<'a> CodeData<'a> {
                     },
                 }
             },
+            ast::StructInitExpr(ref inner) => {
+                unimplemented!();
+            },
             ast::LitNumExpr(value) => {
                 self.instructions.push(asm::AddSignedValue(RESULT_REG, ZERO_REG, value as i16));
             },
@@ -515,7 +460,7 @@ impl<'a> CodeData<'a> {
     fn compile_if(&mut self, scope: &mut Scope, if_statement: &ast::IfStatement) {
         // Check that the expression returns a boolean type
         let cond_type = self.resolve_type(scope, &if_statement.condition.rtype);
-        self.check_type(&cond_type, &Bool, if_statement.span.clone());
+        self.check_type(&cond_type, BOOL_TYPE, if_statement.span.clone());
 
         self.compile_expression(scope, &if_statement.condition);
 
@@ -548,7 +493,7 @@ impl<'a> CodeData<'a> {
             None => {
                 // If the else block was left unspecified, then the if statement must return the
                 // unit type
-                self.check_type(&then_rtype, &Unit, if_statement.span.clone());
+                self.check_type(&then_rtype, UNIT_TYPE, if_statement.span.clone());
             }
         }
 
@@ -562,11 +507,11 @@ impl<'a> CodeData<'a> {
     fn compile_for(&mut self, scope: &mut Scope, for_statement: &ast::ForLoopStatement) {
         // Check that the body of the loop returns the correct type
         let body_rtype = self.resolve_type(scope, &for_statement.body.rtype());
-        self.check_type(&body_rtype, &Unit, for_statement.span.clone());
+        self.check_type(&body_rtype, UNIT_TYPE, for_statement.span.clone());
 
         // Check that the start expression has the correct type
         let start_type = self.resolve_type(scope, &for_statement.start.rtype);
-        self.check_type(&start_type, &Int, for_statement.start.span.clone());
+        self.check_type(&start_type, INT_TYPE, for_statement.start.span.clone());
         // Compile the expression for the range start
         self.compile_expression(scope, &for_statement.start);
         // Write the start expression to the stack
@@ -574,16 +519,16 @@ impl<'a> CodeData<'a> {
 
         // Check that the end expression has the correct type
         let end_type = self.resolve_type(scope, &for_statement.end.rtype);
-        self.check_type(&end_type, &Int, for_statement.end.span.clone());
+        let var_size = self.size_of(&end_type) as u16;
+        self.check_type(&end_type, INT_TYPE, for_statement.end.span.clone());
         // Compile the expression for the range end
         self.compile_expression(scope, &for_statement.end);
         // Write the end expression to the stack
-        self.instructions.push(asm::Store32(asm::Const(Int.size() as i16), STACK_POINTER,
+        self.instructions.push(asm::Store32(asm::Const(var_size as i16), STACK_POINTER,
             RESULT_REG));
 
         // Increment the stack
-        self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER,
-            Int.size() as u16 * 2));
+        self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER, var_size * 2));
 
         // Create a fake ast so the we can refer to the variable inside the loop
         let loop_var_name = for_statement.loop_var.clone();
@@ -593,8 +538,9 @@ impl<'a> CodeData<'a> {
             assignment: None,
             span: for_statement.span.clone(),
         };
-        let loop_var = Variable::new(loop_var_ast, Int, Offset(scope.next_offset));
-        scope.next_offset += Int.size() as i16;
+        let loop_var_type = self.resolve_type(scope, &ast::Primitive(ast::IntType));
+        let loop_var = Variable::new(loop_var_ast, loop_var_type, Offset(scope.next_offset));
+        scope.next_offset += var_size as i16 * 2;
 
         let id = VarIdentId(scope.vars.len());
         scope.add_ident(loop_var_name, id, for_statement.span.clone());
@@ -630,15 +576,14 @@ impl<'a> CodeData<'a> {
         self.instructions.push(asm::Label(end_label));
 
         // Restore the stack
-        self.instructions.push(asm::SubUnsignedValue(STACK_POINTER, STACK_POINTER,
-            Int.size() as u16 * 2));
-        scope.next_offset -= Int.size() as i16;
+        self.instructions.push(asm::SubUnsignedValue(STACK_POINTER, STACK_POINTER, var_size * 2));
+        scope.next_offset -= var_size as i16 * 2;
     }
 
     fn compile_loop(&mut self, scope: &mut Scope, loop_statement: &ast::LoopStatement) {
         // Check that the body of the loop returns the correct type
         let body_rtype = self.resolve_type(scope, &loop_statement.body.rtype());
-        self.check_type(&body_rtype, &Unit, loop_statement.span.clone());
+        self.check_type(&body_rtype, UNIT_TYPE, loop_statement.span.clone());
 
         let start_label = self.anon_label();
         self.instructions.push(asm::Label(start_label.clone()));
@@ -663,7 +608,7 @@ impl<'a> CodeData<'a> {
         let mut stack_offset = 0;
         for arg in call.args.iter() {
             let arg_type = self.resolve_type(scope, &arg.rtype);
-            let arg_size = arg_type.size();
+            let arg_size = self.size_of(&arg_type);
             call_args.push(arg_type);
 
             // Compile the expression
@@ -704,8 +649,8 @@ impl<'a> CodeData<'a> {
         scope.add_ident(let_statement.name.clone(), id, let_statement.span);
 
         let rtype = self.resolve_type(scope, &let_statement.var_type);
-        let var = Variable::new(let_statement.clone(), rtype, Offset(scope.next_offset));
-        scope.next_offset += var.rtype.size() as i16;
+        let var = Variable::new(let_statement.clone(), rtype.clone(), Offset(scope.next_offset));
+        scope.next_offset += self.size_of(&rtype) as i16;
         scope.vars.push(var);
 
         // Compile optional assignment
@@ -718,7 +663,8 @@ impl<'a> CodeData<'a> {
     fn compile_assign(&mut self, scope: &mut Scope, assignment: &ast::Assignment) {
         // Check that the rhs result matches the target
         self.check_type(&self.resolve_type(scope, &assignment.rhs.rtype),
-            &self.resolve_type(scope, &assignment.target.rtype), assignment.span.clone());
+            &self.resolve_type(scope, &assignment.target.rtype),
+            assignment.span.clone());
 
         // Compile the rhs expression and store the result in the location found
         self.compile_expression(scope, &assignment.rhs);
@@ -759,30 +705,21 @@ impl<'a> CodeData<'a> {
         }
     }
 
-    /// Resolve unknown types, and type aliases
-    fn resolve_type(&self, scope: &Scope, type_value: &ast::Type) -> Type {
-        match *type_value {
-            ast::VariableType(ref name) => scope.get_ident(name, InputSpan::invalid()).rtype(),
-            ast::Pointer(ref inner) => Pointer(box self.resolve_type(scope, &**inner)),
-            ast::DerefType(ref inner) => {
-                match self.resolve_type(scope, &**inner) {
-                    Pointer(inner) => *inner,
-                    invalid => {
-                        fail!("type `{}` cannot be dereferenced", invalid);
-                    }
-                }
-            },
-            ref known_type => self.type_table[known_type.clone()].clone(),
-        }
-    }
-
     /// Check that a type is the same as the expected type or one path never returns
     fn check_type(&self, input: &Type, expected: &Type, span: InputSpan) {
-        if input != &BottomType && expected != &BottomType && input != expected {
+        if input != &types::Bottom && expected != &types::Bottom && input != expected {
             self.logger.report_error(format!("incorrect type, expected: {}, found: {}",
                 expected, input), span);
             self.fatal_error();
         }
+    }
+
+    fn size_of(&self, type_: &Type) -> u16 {
+        self.type_table.size_of(type_)
+    }
+
+    fn resolve_type(&self, scope: &Scope, ast_type: &ast::Type) -> Type {
+        self.type_table.resolve_type(scope, ast_type)
     }
 
     fn get_var_location(&self, scope: &Scope, name: &String, span: InputSpan) -> Location {

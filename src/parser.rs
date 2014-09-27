@@ -166,7 +166,36 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_struct_decl(&mut self) -> ast::StructDeclaration {
-        unimplemented!()
+        let span_start = self.current_pos();
+        let name = self.parse_name();
+        self.expect(lexer::LeftBrace);
+
+        let mut fields = vec![];
+        loop {
+            if self.peek() == lexer::RightBrace {
+                break;
+            }
+
+            // Read the field
+            let field_name = self.parse_name();
+            self.expect(lexer::Colon);
+            let field_type = self.parse_type();
+            fields.push((field_name, field_type));
+
+            // Check if there might be another field
+            if self.peek() != lexer::Comma {
+                break;
+            }
+            self.bump();
+        }
+
+        self.expect(lexer::RightBrace);
+
+        ast::StructDeclaration {
+            name: name,
+            fields: fields,
+            span: InputSpan::new(span_start, self.current_pos()),
+        }
     }
 
     fn parse_let(&mut self) -> ast::LetStatement {
@@ -447,14 +476,22 @@ impl<'a> Parser<'a> {
 
     fn handle_ident(&mut self, name: String, span_start: InputPos) -> ast::Expression {
         match self.peek() {
+            // This corresponds to a function call
             lexer::LeftParen => {
                 self.bump();
                 self.parse_call(name, span_start)
             },
 
-            lexer::LeftBracket => unimplemented!(),
+            // This corresponds to a struct initialisation
+            lexer::LeftBracket => {
+                self.bump();
+                self.parse_function_init(name, span_start)
+            },
+
+            // This corresponds to getting a field of a struct
             lexer::Dot => unimplemented!(),
 
+            // Otherwise it is just an ordinary variable
             _ => {
                 ast::Expression {
                     expr: box ast::VariableExpr(name.clone()),
@@ -495,6 +532,43 @@ impl<'a> Parser<'a> {
         ast::Expression {
             expr: box ast::CallExpr(function_call),
             rtype: ast::VariableType(name),
+            span: InputSpan::new(span_start, self.current_pos()),
+        }
+    }
+
+    fn parse_function_init(&mut self, name: String, span_start: InputPos) -> ast::Expression {
+        let mut fields = vec![];
+
+        loop {
+            if self.peek() == lexer::RightBrace {
+                break;
+            }
+
+            // Read the target field
+            let target = self.parse_name();
+            self.expect(lexer::Colon);
+            // Read expression
+            let expression = self.parse_expression();
+            fields.push((target, expression));
+
+            // Check if there might be another field
+            if self.peek() != lexer::Comma {
+                break;
+            }
+            self.bump();
+        }
+
+        self.expect(lexer::RightBrace);
+
+        let struct_init = ast::StructInit {
+            type_name: name.clone(),
+            field_init: fields,
+            span: InputSpan::new(span_start, self.current_pos()),
+        };
+
+        ast::Expression {
+            expr: box ast::StructInitExpr(struct_init),
+            rtype: ast::UserType(name),
             span: InputSpan::new(span_start, self.current_pos()),
         }
     }
@@ -549,14 +623,7 @@ impl<'a> Parser<'a> {
     /// Parse a for statement defined by:
     ///     for <Ident> in range(<Expression>, <Expression>) <Block>
     fn parse_for(&mut self, span_start: InputPos) -> ast::Expression {
-        let loop_var = match self.next_token() {
-            lexer::Ident(name) => name,
-            invalid => {
-                self.logger.report_error(format!("expected `<Ident>` but found `{}`", invalid),
-                    InputSpan::new(span_start, self.current_pos()));
-                self.fatal_error();
-            },
-        };
+        let loop_var = self.parse_name();
 
         // At the moment the syntax for `for` expressions is very restrictive, however this can
         // be changed in the future.

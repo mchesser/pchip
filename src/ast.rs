@@ -64,11 +64,13 @@ pub enum Expr {
     LetExpr(LetStatement),
     AssignExpr(Assignment),
     VariableExpr(String),
+    StructInitExpr(StructInit),
     LitNumExpr(int),
-
-    // Other
+    FieldExpr(FieldRef),
     RefExpr(String),
     DerefExpr(Expression),
+
+
     AsmOpExpr(String),
     EmptyExpr,
 }
@@ -114,7 +116,7 @@ pub struct ForLoopStatement {
 #[deriving(Show, Clone)]
 pub struct StructDeclaration {
     pub name: String,
-    pub components: Vec<(String, PrimitiveType)>,
+    pub fields: Vec<(String, Type)>,
     pub span: InputSpan,
 }
 
@@ -146,5 +148,19 @@ pub struct LetStatement {
 pub struct Assignment {
     pub target: Expression,
     pub rhs: Expression,
+    pub span: InputSpan,
+}
+
+#[deriving(Show, Clone)]
+pub struct StructInit {
+    pub type_name: String,
+    pub field_init: Vec<(String, Expression)>,
+    pub span: InputSpan,
+}
+
+#[deriving(Show, Clone)]
+pub struct FieldRef {
+    pub field: Expression,
+    pub target: String,
     pub span: InputSpan,
 }
