@@ -82,7 +82,9 @@ impl TypeTable {
             ast::Pointer(ref inner) => Pointer(box self.resolve_type(scope, &**inner)),
             ast::DerefType(ref inner) => {
                 match self.resolve_type(scope, &**inner) {
-                    Pointer(inner) => *inner.clone(),
+                    Pointer(inner) => {
+                        *inner.clone()
+                    },
                     invalid => {
                         fail!("type `{}` cannot be dereferenced", invalid);
                     }
