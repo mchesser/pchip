@@ -483,9 +483,15 @@ impl<'a> Parser<'a> {
             },
 
             // This corresponds to a struct initialisation
-            lexer::LeftBracket => {
+            lexer::LeftBrace => {
                 self.bump();
                 self.parse_function_init(name, span_start)
+            },
+
+            // This corresponds to vector indexing
+            lexer::LeftBracket => {
+                self.bump();
+                unimplemented!()
             },
 
             // This corresponds to getting a field of a struct
