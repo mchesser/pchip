@@ -775,7 +775,9 @@ impl<'a> CodeData<'a> {
         }
 
         let lshift_amount = (num as f32).log2() as u16;
-        self.instructions.push(asm::LShiftValue(RESULT_REG, RESULT_REG, lshift_amount));
+        if lshift_amount != 0 {
+            self.instructions.push(asm::LShiftValue(RESULT_REG, RESULT_REG, lshift_amount));
+        }
     }
 
     /// Check that a type is the same as the expected type or one path never returns
