@@ -39,6 +39,7 @@ pub enum Type {
     Primitive(PrimitiveType),
     Pointer(Box<Type>),
     DerefType(Box<Type>),
+    FieldRefType(Box<Type>, String),
     UserType(String),
     VariableType(String),
 }
@@ -66,10 +67,10 @@ pub enum Expr {
     VariableExpr(String),
     StructInitExpr(StructInit),
     LitNumExpr(int),
-    FieldExpr(FieldRef),
+    FieldRefExpr(FieldRef),
+    ArrayIndexExpr(ArrayIndex),
     RefExpr(String),
     DerefExpr(Expression),
-
 
     AsmOpExpr(String),
     EmptyExpr,
@@ -160,7 +161,14 @@ pub struct StructInit {
 
 #[deriving(Show, Clone)]
 pub struct FieldRef {
-    pub field: Expression,
-    pub target: String,
+    pub field: String,
+    pub target: Expression,
+    pub span: InputSpan,
+}
+
+#[deriving(Show, Clone)]
+pub struct ArrayIndex {
+    pub index: Expression,
+    pub target: Expression,
     pub span: InputSpan,
 }

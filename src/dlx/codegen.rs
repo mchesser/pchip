@@ -29,6 +29,8 @@ static RETURN_REG: RegId = 31;
 static RESULT_REG: RegId = 1;
 // Register used for temporary values
 static TEMP_REG: RegId = 2;
+// Register used for storing addresses
+static ADDR_REG: RegId = 3;
 
 static DATA_SEGMENT: &'static str =
 "
@@ -197,6 +199,7 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start
         type_table: types::typegen(&program),
         label_count: 0,
         logger: logger,
+        add_to_address: false,
     };
 
     // Parse globals
@@ -247,6 +250,7 @@ struct CodeData<'a> {
     type_table: TypeTable,
     label_count: uint,
     logger: &'a Logger<'a>,
+    add_to_address: bool,
 }
 
 impl<'a> CodeData<'a> {
@@ -399,12 +403,29 @@ impl<'a> CodeData<'a> {
 
             },
             ast::DerefExpr(ref inner) => {
+                // Check that we can dereference the expression
+                let inner_type = self.resolve_type(scope, &inner.rtype);
+                match inner_type {
+                    types::Pointer(..) => {},
+                    invalid => {
+                        self.logger.report_error(format!("type `{}` cannot be dereferenced",
+                            "FIXME"), span);
+                        self.fatal_error();
+                    }
+                }
+
                 // Evaluate the inner expression
                 self.compile_expression(scope, inner);
+
                 // Then dereference it
                 self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), RESULT_REG));
             },
-            ast::FieldExpr(ref inner) => unimplemented!(),
+            ast::FieldRefExpr(ref inner) => unimplemented!(),
+            ast::ArrayIndexExpr(ref inner) => {
+                self.compile_array_index(scope, inner);
+                // Then dereference it
+                self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), RESULT_REG));
+            },
             ast::IfExpr(ref inner) => self.compile_if(scope, inner),
             ast::ForLoopExpr(ref inner) => self.compile_for(scope, inner),
             ast::LoopExpr(ref inner) => self.compile_loop(scope, inner),
@@ -455,6 +476,41 @@ impl<'a> CodeData<'a> {
             }
             ast::EmptyExpr => {},
         }
+    }
+
+    fn compile_array_index(&mut self, scope: &mut Scope, index_expr: &ast::ArrayIndex) {
+        // Check that the type that we are indexing can be indexed
+        let target_type = self.resolve_type(scope, &index_expr.target.rtype);
+        match target_type {
+            types::Pointer(..) => {},
+            invalid => {
+                self.logger.report_error(format!("type `{}` cannot be dereferenced", "FIXME"),
+                    index_expr.span);
+                self.fatal_error();
+            }
+        }
+
+        // Evaluate the index
+        self.compile_expression(scope, &index_expr.index);
+        // Multiply by the size of the target type
+        let type_size = self.size_of(&target_type);
+        self.multiply_by(type_size as uint);
+
+        // Either replace or add to the current address
+        if self.add_to_address {
+            self.instructions.push(asm::AddUnsigned(ADDR_REG, RESULT_REG, ADDR_REG));
+        }
+        else {
+            self.instructions.push(asm::AddUnsigned(ADDR_REG, RESULT_REG, ZERO_REG));
+        }
+
+        // Evaluate the target address
+        self.add_to_address = true;
+        self.compile_expression(scope, &index_expr.target);
+        self.add_to_address = false;
+
+        // Add the index to the target address
+        self.instructions.push(asm::AddUnsigned(RESULT_REG, RESULT_REG, ADDR_REG));
     }
 
     fn compile_if(&mut self, scope: &mut Scope, if_statement: &ast::IfStatement) {
@@ -697,6 +753,12 @@ impl<'a> CodeData<'a> {
                 self.instructions.push(asm::Store32(asm::Const(0), RESULT_REG, TEMP_REG));
             },
 
+            ast::ArrayIndexExpr(ref inner) => {
+                self.instructions.push(asm::AddSigned(TEMP_REG, RESULT_REG, ZERO_REG));
+                self.compile_array_index(scope, inner);
+                self.instructions.push(asm::Store32(asm::Const(0), RESULT_REG, TEMP_REG));
+            },
+
             _ => {
                 self.logger.report_error(format!("illegal left-hand side expression"),
                     assignment.target.span.clone());
@@ -705,12 +767,31 @@ impl<'a> CodeData<'a> {
         }
     }
 
+    fn multiply_by(&mut self, num: uint) {
+        // Check if it is a power of 2
+        // TODO: Generate extra code for multiplications that are not a power of 2
+        if !(num & (num - 1) == 0) {
+            fail!("ICE, error multiplying by a number that is not a power of 2");
+        }
+
+        let lshift_amount = (num as f32).log2() as u16;
+        self.instructions.push(asm::LShiftValue(RESULT_REG, RESULT_REG, lshift_amount));
+    }
+
     /// Check that a type is the same as the expected type or one path never returns
     fn check_type(&self, input: &Type, expected: &Type, span: InputSpan) {
         if input != &types::Bottom && expected != &types::Bottom && input != expected {
             self.logger.report_error(format!("incorrect type, expected: {}, found: {}",
                 expected, input), span);
             self.fatal_error();
+        }
+    }
+
+    // Check if a specified type is a pointer
+    fn is_pointer(&self, input: &Type) -> bool {
+        match *input {
+            types::Pointer(..) => true,
+            _ => false,
         }
     }
 

@@ -67,6 +67,7 @@ pub enum Type {
     Normal(TypeId),
     Array(Box<Type>, u16),
     Pointer(Box<Type>),
+    Any,
     Bottom,
 }
 
@@ -91,6 +92,7 @@ impl TypeTable {
                 }
             },
             ast::Primitive(ast::BottomType) => Bottom,
+            ast::Primitive(ast::AnyType) => Any,
             ref resolved_ast => Normal(self.type_map[ast_type.clone()]),
         }
     }
@@ -101,6 +103,7 @@ impl TypeTable {
             Array(ref inner, size) => self.size_of(&**inner) * size,
             Pointer(..) => 4,
             Bottom => fail!("ICE: Attempted to determine size of bottom type"),
+            Any => fail!("ICE: Attempted to determine size of any type"),
         }
     }
 

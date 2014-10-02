@@ -87,6 +87,9 @@ pub enum Instruction {
     OrValue(RegId, RegId, u16),
     Xor(RegId, RegId, RegId),
     XorValue(RegId, RegId, u16),
+
+    // LShift(RegId, RegId, RegId),
+    LShiftValue(RegId, RegId, u16),
     // RShiftSign(RegId, RegId, RegId),
     // RShiftSignValue(RegId, RegId, u16),
     // RShiftZero(RegId, RegId, RegId),
@@ -169,11 +172,13 @@ impl Instruction {
             SetLtEqUnsignedValue(j, i, u)  => format!("sleui r{},r{},{}", j, i, u),
 
             And(k, i, j)      => format!("and   r{},r{},r{}", k, i, j),
-            AndValue(j, i, u) => format!("andi  r{},r{},r{}", j, i, u),
+            AndValue(j, i, u) => format!("andi  r{},r{},{}", j, i, u),
             Or(k, i, j)       => format!("or    r{},r{},r{}", k, i, j),
-            OrValue(j, i, u)  => format!("ori   r{},r{},r{}", j, i, u),
+            OrValue(j, i, u)  => format!("ori   r{},r{},{}", j, i, u),
             Xor(k, i, j)      => format!("xor   r{},r{},r{}", k, i, j),
-            XorValue(j, i, u) => format!("xori  r{},r{},r{}", j, i, u),
+            XorValue(j, i, u) => format!("xori  r{},r{},{}", j, i, u),
+
+            LShiftValue(j, i, u) => format!("slli  r{},r{},{}", j, i, u),
 
             Halt => format!("halt"),
             Nop => format!("nop"),

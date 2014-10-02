@@ -440,15 +440,19 @@ impl<'a> Parser<'a> {
             },
         };
 
-        // Handle type casts and infix operators
+        self.parse_expression_end(expression)
+    }
+
+    fn parse_expression_end(&mut self, expression: ast::Expression) -> ast::Expression {
+        let span_start = self.current_pos();
         match self.peek() {
-            // Type cast
             lexer::As => {
                 self.bump();
+                let mut expression = expression;
                 expression.rtype = self.parse_type();
+                expression
             },
 
-            // Infix operators
             lexer::Assignment => {
                 self.bump();
                 let rhs = self.parse_expression();
@@ -457,11 +461,50 @@ impl<'a> Parser<'a> {
                     rhs: rhs,
                     span: InputSpan::new(span_start, self.current_pos()),
                 };
-                expression = ast::Expression {
+                ast::Expression {
                     expr: box ast::AssignExpr(assignment),
                     rtype: ast::Primitive(ast::UnitType),
                     span: InputSpan::new(span_start, self.current_pos()),
+                }
+            },
+
+            lexer::LeftBracket => {
+                self.bump();
+
+                let index = self.parse_expression();
+                self.expect(lexer::RightBracket);
+
+                let rtype = ast::DerefType(box expression.rtype.clone());
+                let index_expr = ast::ArrayIndex {
+                    target: expression,
+                    index: index,
+                    span: InputSpan::new(span_start, self.current_pos()),
                 };
+                let new_expression = ast::Expression {
+                    expr: box ast::ArrayIndexExpr(index_expr),
+                    rtype: rtype,
+                    span: InputSpan::new(span_start, self.current_pos()),
+                };
+                self.parse_expression_end(new_expression)
+            },
+
+            lexer::Dot => {
+                self.bump();
+
+                let field_name = self.parse_name();
+
+                let rtype = ast::FieldRefType(box expression.rtype.clone(), field_name.clone());
+                let field_ref_expr = ast::FieldRef {
+                    field: field_name,
+                    target: expression,
+                    span: InputSpan::new(span_start, self.current_pos()),
+                };
+                let new_expression = ast::Expression {
+                    expr: box ast::FieldRefExpr(field_ref_expr),
+                    rtype: rtype,
+                    span: InputSpan::new(span_start, self.current_pos()),
+                };
+                self.parse_expression_end(new_expression)
             },
 
             lexer::Plus => unimplemented!(),
@@ -469,14 +512,14 @@ impl<'a> Parser<'a> {
             lexer::PlusEq => unimplemented!(),
             lexer::MinusEq => unimplemented!(),
 
-            _ => {},
+            _ => expression,
         }
-        expression
     }
 
     fn handle_ident(&mut self, name: String, span_start: InputPos) -> ast::Expression {
         match self.peek() {
-            // This corresponds to a function call
+            // This corresponds to a function call.
+            // NOTE: if we want to support methods this needs to be handled in parse_expression_end
             lexer::LeftParen => {
                 self.bump();
                 self.parse_call(name, span_start)
@@ -487,15 +530,6 @@ impl<'a> Parser<'a> {
                 self.bump();
                 self.parse_function_init(name, span_start)
             },
-
-            // This corresponds to vector indexing
-            lexer::LeftBracket => {
-                self.bump();
-                unimplemented!()
-            },
-
-            // This corresponds to getting a field of a struct
-            lexer::Dot => unimplemented!(),
 
             // Otherwise it is just an ordinary variable
             _ => {
