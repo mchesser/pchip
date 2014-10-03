@@ -507,7 +507,7 @@ impl<'a> CodeData<'a> {
         // Evaluate the index
         self.compile_expression(scope, &index_expr.index);
         // Multiply by the size of the target type
-        let type_size = self.size_of(&target_type);
+        let type_size = self.size_of(target_type.deref());
         self.multiply_by(type_size as uint);
 
         // Either replace or add to the current address
@@ -731,42 +731,62 @@ impl<'a> CodeData<'a> {
     }
 
     fn compile_assign(&mut self, scope: &mut Scope, assignment: &ast::Assignment) {
+        let target_type = self.resolve_type(scope, &assignment.target.rtype);
+
         // Check that the rhs result matches the target
-        self.check_type(&self.resolve_type(scope, &assignment.rhs.rtype),
-            &self.resolve_type(scope, &assignment.target.rtype),
+        self.check_type(&self.resolve_type(scope, &assignment.rhs.rtype), &target_type,
             assignment.span.clone());
 
         // Compile the rhs expression and store the result in the location found
         self.compile_expression(scope, &assignment.rhs);
+        self.instructions.push(asm::AddSigned(TEMP_REG, RESULT_REG, ZERO_REG));
 
+        // Get the address of where we want to place the variable
         let target_span = assignment.target.span.clone();
         match *assignment.target.expr {
-            // Assignment to an ordinary variable
+            // Assignment to an ordinary variable, we want to assign to the address of this variable
             ast::VariableExpr(ref name) => {
                 let var = scope.get_ident(name, target_span).unwrap_var();
-                self.load_var(var);
+                self.address_of(var);
             },
+
             // Assignment to a dereference of a pointer
-            ast::DerefExpr(ref inner) => {
-                // Store the result from evaluating the RHS in a temp register
-                self.instructions.push(asm::AddSigned(TEMP_REG, RESULT_REG, ZERO_REG));
-                // Evaluate the target address
-                self.compile_expression(scope, inner);
-                // Then copy the result to the location that was dereferenced
-                self.instructions.push(asm::Store32(asm::Const(0), RESULT_REG, TEMP_REG));
-            },
+            // The inner expression contains the address of the place we want to assign to
+            ast::DerefExpr(ref inner) => self.compile_expression(scope, inner),
 
-            ast::ArrayIndexExpr(ref inner) => {
-                self.instructions.push(asm::AddSigned(TEMP_REG, RESULT_REG, ZERO_REG));
-                self.compile_array_index(scope, inner);
-                self.instructions.push(asm::Store32(asm::Const(0), RESULT_REG, TEMP_REG));
-            },
+            // Assignment to an index of an array
+            ast::ArrayIndexExpr(ref inner) => self.compile_array_index(scope, inner),
 
+            // Assignment to anything else is invalid
             _ => {
                 self.logger.report_error(format!("illegal left-hand side expression"),
                     assignment.target.span.clone());
                 self.fatal_error();
             },
+        };
+
+        // We now have the result of the rhs in TEMP_REG and the address we want to assign to in
+        // RESULT_REG. The type of the variable is required so that we know how to copy the data.
+        self.copy_var(target_type, TEMP_REG, RESULT_REG);
+    }
+
+    fn copy_var(&mut self, var_type: types::Type, from: asm::RegId, to: asm::RegId) {
+        match var_type {
+            // These types can be stored in a single word, so we can just copy them directly
+            INT_TYPE | BOOL_TYPE | types::Pointer(..) => {
+                self.instructions.push(asm::Store32(asm::Const(0), to, from));
+            },
+
+            // Other types cannot be stored in a single word, and since there is no easy way to do
+            // a memcopy in DLX we must manually copy all bytes
+            other => {
+                // NOTE: types *must* be word aligned
+                let num_words = (self.size_of(&other) / 4) as i16;
+                for i in range(0, num_words) {
+                    self.instructions.push(asm::Store32(asm::Const(i * 4), to, from));
+                    self.instructions.push(asm::AddUnsignedValue(from, from, 4));
+                }
+            }
         }
     }
 
@@ -776,12 +796,12 @@ impl<'a> CodeData<'a> {
             INT_TYPE | BOOL_TYPE | types::Pointer(..) => {
                 match var.location {
                     Label(ref label) => {
-                        self.instructions.push(asm::Store32(asm::Unknown(label.clone()), ZERO_REG,
-                            RESULT_REG));
+                        self.instructions.push(asm::Load32(RESULT_REG, asm::Unknown(label.clone()),
+                            ZERO_REG));
                     },
                     Offset(amount) => {
-                        self.instructions.push(asm::Store32(asm::Const(amount), FRAME_POINTER,
-                            RESULT_REG));
+                        self.instructions.push(asm::Load32(RESULT_REG, asm::Const(amount),
+                            FRAME_POINTER));
                     },
                 }
             },

@@ -71,6 +71,16 @@ pub enum Type {
     Bottom,
 }
 
+impl Type {
+    pub fn deref(&self) -> &Type {
+        match *self {
+            StaticArray(ref inner, _) => &**inner,
+            Pointer(ref inner) => &**inner,
+            ref invalid => fail!("ICE: Attempted to dereference `{}`", invalid),
+        }
+    }
+}
+
 pub struct TypeTable {
     type_map: HashMap<ast::Type, uint>,
     types: Vec<BaseType>,
