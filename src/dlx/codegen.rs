@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fmt;
 
 use ast;
 
@@ -9,11 +8,11 @@ use dlx::asm::Instruction;
 use dlx::types;
 use dlx::types::{Type, TypeTable};
 
-use error::{InputPos, InputSpan, Logger};
+use error::{InputSpan, Logger};
 
-static INT_TYPE: &'static Type = &types::Normal(0);
-static BOOL_TYPE: &'static Type = &types::Normal(1);
-static UNIT_TYPE: &'static Type = &types::Normal(2);
+static INT_TYPE: Type = types::Normal(0);
+static BOOL_TYPE: Type = types::Normal(1);
+static UNIT_TYPE: Type = types::Normal(2);
 
 // Special register that is always 0
 static ZERO_REG: RegId = 0;
@@ -89,7 +88,6 @@ impl Function {
 enum Location {
     Label(LabelId),
     Offset(i16),
-    Register(RegId),
 }
 
 struct Variable {
@@ -126,6 +124,13 @@ impl<'a> Ident<'a> {
             VarIdent(var) => var.rtype.clone(),
         }
     }
+
+    fn unwrap_var(self) -> &'a Variable {
+        match self {
+            FnIdent(..) => fail!("ICE attempted to unwrap function when attempting to get var"),
+            VarIdent(var) => var,
+        }
+    }
 }
 
 pub struct Scope<'a> {
@@ -160,7 +165,7 @@ impl<'a> Scope<'a> {
     }
 
     /// Add an identifier to the scope
-    fn add_ident(&mut self, ident_name: String, ident: IdentId, span: InputSpan) {
+    fn add_ident(&mut self, ident_name: String, ident: IdentId, _span: InputSpan) {
         let stored_ident = self.ident_table.find_or_insert(ident_name, ident);
         // If the stored identifier is different to the one we are attempting to add, then this
         // identifier shadows an existing one. Variable shadowing is currently not supported.
@@ -289,6 +294,25 @@ impl<'a> CodeData<'a> {
                         self.instructions.push(asm::AllocateWords(vec![n as i32]));
                     },
 
+                    ast::StaticArrayExpr(ref inner) => {
+                        match *inner.elements[0].expr {
+                            // Array of integers
+                            ast::LitNumExpr(..) => {
+                                let mut unwrapped = vec![];
+                                for element in inner.elements.iter() {
+                                    match *element.expr {
+                                        ast::LitNumExpr(n) => unwrapped.push(n as i32),
+                                        ref invalid => fail!("Array has not literal value"),
+                                    }
+                                }
+                                self.instructions.push(asm::AllocateWords(unwrapped));
+                            },
+                            ref invalid => {
+                                fail!("Unable to statically resolve expression: `{}`", invalid)
+                            },
+                        }
+                    },
+
                     // TODO: Handle other types of static data
                     _ => unimplemented!(),
                 }
@@ -396,9 +420,6 @@ impl<'a> CodeData<'a> {
                         self.instructions.push(asm::AddSignedValue(RESULT_REG, FRAME_POINTER,
                             offset))
                     },
-                    Register(..) => {
-                        fail!("ICE: Attempted to take the address of a variable in a register")
-                    },
                 }
 
             },
@@ -406,19 +427,24 @@ impl<'a> CodeData<'a> {
                 // Check that we can dereference the expression
                 let inner_type = self.resolve_type(scope, &inner.rtype);
                 match inner_type {
-                    types::Pointer(..) => {},
-                    invalid => {
+                    types::Pointer(..) => {
+                        // Evaluate the inner expression
+                        self.compile_expression(scope, inner);
+
+                        // Then dereference it
+                        self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), RESULT_REG));
+                    },
+                    types::StaticArray(..) => {
+                        // Evaluate the inner expression
+                        self.compile_expression(scope, inner);
+                        // Since this is a static array we don't need to dereference it
+                    },
+                    _invalid => {
                         self.logger.report_error(format!("type `{}` cannot be dereferenced",
                             "FIXME"), span);
                         self.fatal_error();
                     }
                 }
-
-                // Evaluate the inner expression
-                self.compile_expression(scope, inner);
-
-                // Then dereference it
-                self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), RESULT_REG));
             },
             ast::FieldRefExpr(ref inner) => unimplemented!(),
             ast::ArrayIndexExpr(ref inner) => {
@@ -447,23 +473,11 @@ impl<'a> CodeData<'a> {
             ast::LetExpr(ref inner) => self.compile_let(scope, inner),
             ast::AssignExpr(ref inner) => self.compile_assign(scope, inner),
             ast::VariableExpr(ref name) => {
-                let var_location = match scope.get_ident(name, InputSpan::invalid()) {
-                    FnIdent(..) => fail!("ICE: Functions can't be treated as variables yet"),
-                    VarIdent(ident) => ident.location.clone(),
-                };
-                match var_location {
-                    Label(label) => {
-                        self.instructions.push(asm::Load32(RESULT_REG, asm::Unknown(label),
-                            ZERO_REG));
-                    },
-                    Offset(amount) => {
-                        self.instructions.push(asm::Load32(RESULT_REG, asm::Const(amount),
-                            FRAME_POINTER));
-                    },
-                    Register(id) => {
-                        self.instructions.push(asm::AddSigned(RESULT_REG, id, ZERO_REG));
-                    },
-                }
+                let var = scope.get_ident(name, span).unwrap_var();
+                self.load_var(var);
+            },
+            ast::StaticArrayExpr(ref inner) => {
+                unimplemented!();
             },
             ast::StructInitExpr(ref inner) => {
                 unimplemented!();
@@ -482,8 +496,8 @@ impl<'a> CodeData<'a> {
         // Check that the type that we are indexing can be indexed
         let target_type = self.resolve_type(scope, &index_expr.target.rtype);
         match target_type {
-            types::Pointer(..) => {},
-            invalid => {
+            types::Pointer(..) | types::StaticArray(..) => {},
+            _invalid => {
                 self.logger.report_error(format!("type `{}` cannot be dereferenced", "FIXME"),
                     index_expr.span);
                 self.fatal_error();
@@ -516,7 +530,7 @@ impl<'a> CodeData<'a> {
     fn compile_if(&mut self, scope: &mut Scope, if_statement: &ast::IfStatement) {
         // Check that the expression returns a boolean type
         let cond_type = self.resolve_type(scope, &if_statement.condition.rtype);
-        self.check_type(&cond_type, BOOL_TYPE, if_statement.span.clone());
+        self.check_type(&cond_type, &BOOL_TYPE, if_statement.span.clone());
 
         self.compile_expression(scope, &if_statement.condition);
 
@@ -549,7 +563,7 @@ impl<'a> CodeData<'a> {
             None => {
                 // If the else block was left unspecified, then the if statement must return the
                 // unit type
-                self.check_type(&then_rtype, UNIT_TYPE, if_statement.span.clone());
+                self.check_type(&then_rtype, &UNIT_TYPE, if_statement.span.clone());
             }
         }
 
@@ -563,11 +577,11 @@ impl<'a> CodeData<'a> {
     fn compile_for(&mut self, scope: &mut Scope, for_statement: &ast::ForLoopStatement) {
         // Check that the body of the loop returns the correct type
         let body_rtype = self.resolve_type(scope, &for_statement.body.rtype());
-        self.check_type(&body_rtype, UNIT_TYPE, for_statement.span.clone());
+        self.check_type(&body_rtype, &UNIT_TYPE, for_statement.span.clone());
 
         // Check that the start expression has the correct type
         let start_type = self.resolve_type(scope, &for_statement.start.rtype);
-        self.check_type(&start_type, INT_TYPE, for_statement.start.span.clone());
+        self.check_type(&start_type, &INT_TYPE, for_statement.start.span.clone());
         // Compile the expression for the range start
         self.compile_expression(scope, &for_statement.start);
         // Write the start expression to the stack
@@ -576,7 +590,7 @@ impl<'a> CodeData<'a> {
         // Check that the end expression has the correct type
         let end_type = self.resolve_type(scope, &for_statement.end.rtype);
         let var_size = self.size_of(&end_type) as u16;
-        self.check_type(&end_type, INT_TYPE, for_statement.end.span.clone());
+        self.check_type(&end_type, &INT_TYPE, for_statement.end.span.clone());
         // Compile the expression for the range end
         self.compile_expression(scope, &for_statement.end);
         // Write the end expression to the stack
@@ -639,7 +653,7 @@ impl<'a> CodeData<'a> {
     fn compile_loop(&mut self, scope: &mut Scope, loop_statement: &ast::LoopStatement) {
         // Check that the body of the loop returns the correct type
         let body_rtype = self.resolve_type(scope, &loop_statement.body.rtype());
-        self.check_type(&body_rtype, UNIT_TYPE, loop_statement.span.clone());
+        self.check_type(&body_rtype, &UNIT_TYPE, loop_statement.span.clone());
 
         let start_label = self.anon_label();
         self.instructions.push(asm::Label(start_label.clone()));
@@ -729,20 +743,9 @@ impl<'a> CodeData<'a> {
         match *assignment.target.expr {
             // Assignment to an ordinary variable
             ast::VariableExpr(ref name) => {
-                match self.get_var_location(scope, name, target_span) {
-                    Label(label) => {
-                        self.instructions.push(asm::Store32(asm::Unknown(label), ZERO_REG,
-                            RESULT_REG));
-                    },
-                    Offset(amount) => {
-                        self.instructions.push(asm::Store32(asm::Const(amount), FRAME_POINTER,
-                            RESULT_REG));
-                    },
-                    Register(id) => {
-                        self.instructions.push(asm::AddSigned(id, RESULT_REG, ZERO_REG));
-                    },
-                }
-            }
+                let var = scope.get_ident(name, target_span).unwrap_var();
+                self.load_var(var);
+            },
             // Assignment to a dereference of a pointer
             ast::DerefExpr(ref inner) => {
                 // Store the result from evaluating the RHS in a temp register
@@ -763,6 +766,39 @@ impl<'a> CodeData<'a> {
                 self.logger.report_error(format!("illegal left-hand side expression"),
                     assignment.target.span.clone());
                 self.fatal_error();
+            },
+        }
+    }
+
+    fn load_var(&mut self, var: &Variable) {
+        match var.rtype {
+            // These types can be stored in registers so we load their value into the result reg
+            INT_TYPE | BOOL_TYPE | types::Pointer(..) => {
+                match var.location {
+                    Label(ref label) => {
+                        self.instructions.push(asm::Store32(asm::Unknown(label.clone()), ZERO_REG,
+                            RESULT_REG));
+                    },
+                    Offset(amount) => {
+                        self.instructions.push(asm::Store32(asm::Const(amount), FRAME_POINTER,
+                            RESULT_REG));
+                    },
+                }
+            },
+            // These types cannot be stored in registers so we load their address into the result
+            // reg
+            _ => self.address_of(var),
+        }
+    }
+
+    fn address_of(&mut self, var: &Variable) {
+        match var.location {
+            Label(ref label) => {
+                let asm = format!("        addui   r{},r{},{}", RESULT_REG, ZERO_REG, label);
+                self.instructions.push(asm::RawAsm(asm));
+            },
+            Offset(offset) => {
+                self.instructions.push(asm::AddSignedValue(RESULT_REG, FRAME_POINTER, offset));
             },
         }
     }
@@ -789,26 +825,11 @@ impl<'a> CodeData<'a> {
         }
     }
 
-    // Check if a specified type is a pointer
-    fn is_pointer(&self, input: &Type) -> bool {
-        match *input {
-            types::Pointer(..) => true,
-            _ => false,
-        }
-    }
-
     fn size_of(&self, type_: &Type) -> u16 {
         self.type_table.size_of(type_)
     }
 
     fn resolve_type(&self, scope: &Scope, ast_type: &ast::Type) -> Type {
         self.type_table.resolve_type(scope, ast_type)
-    }
-
-    fn get_var_location(&self, scope: &Scope, name: &String, span: InputSpan) -> Location {
-        match scope.get_ident(name, span) {
-            VarIdent(ident) => ident.location.clone(),
-            FnIdent(..) => fail!("EXPECTED_VAR_FOUND_FUNCTION_ERROR, TODO: Improve this error"),
-        }
     }
 }

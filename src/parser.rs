@@ -269,12 +269,34 @@ impl<'a> Parser<'a> {
     fn parse_type(&mut self) -> ast::Type {
         let span_start = self.current_pos();
         match self.next_token() {
+            // User defined types
             lexer::Ident(name) => ast::UserType(name.clone()),
+
+            // Primitive types
             lexer::Int => ast::Primitive(ast::IntType),
             lexer::Char => ast::Primitive(ast::CharType),
             lexer::Bool => ast::Primitive(ast::BoolType),
             lexer::Any => ast::Primitive(ast::AnyType),
+
+            // Pointers
             lexer::Star => ast::Pointer(box self.parse_type()),
+
+            // Arrays
+            lexer::LeftBracket => {
+                let inner_type = self.parse_type();
+                self.expect(lexer::Comma);
+                self.expect(lexer::Dot);
+                self.expect(lexer::Dot);
+                let size = match self.next_token() {
+                    lexer::LitNum(n) => n,
+                    invalid => {
+                        self.logger.report_error(format!("expected `<integer>` but found `{}`",
+                            invalid), InputSpan::new(span_start, self.current_pos()));
+                        self.fatal_error();
+                    },
+                };
+                ast::StaticArrayType(box inner_type, size)
+            },
 
             invalid => {
                 self.logger.report_error(format!("expected `<Type>` but found `{}`", invalid),
@@ -355,7 +377,7 @@ impl<'a> Parser<'a> {
     ///  - Allow block expressions
     fn parse_expression(&mut self) -> ast::Expression {
         let span_start = self.current_pos();
-        let mut expression = match self.next_token() {
+        let expression = match self.next_token() {
             lexer::Amp => {
                 let target = self.parse_expression();
                 let rtype = ast::Pointer(box target.rtype.clone());
@@ -410,6 +432,7 @@ impl<'a> Parser<'a> {
                     span: InputSpan::new(span_start, self.current_pos()),
                 }
             },
+            lexer::LeftBracket => self.parse_static_array(span_start),
             lexer::Minus => {
                 match self.peek() {
                     lexer::LitNum(value) => {
@@ -418,7 +441,7 @@ impl<'a> Parser<'a> {
                     },
                     _ => fail!("ICE: Cannot negate expression")
                 }
-            }
+            },
             lexer::Let => {
                 ast::Expression {
                     expr: box ast::LetExpr(self.parse_let()),
@@ -613,7 +636,50 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn handle_num(&mut self, val: int, span_start: InputPos) -> ast::Expression {
+    fn parse_static_array(&mut self, span_start: InputPos) -> ast::Expression {
+        let mut elements = vec![];
+
+        loop {
+            match self.peek() {
+                lexer::RightBracket => {
+                    self.bump();
+                    break;
+                },
+                _ => {
+                    elements.push(self.parse_expression());
+                    if self.peek() == lexer::Comma {
+                        self.bump();
+                        continue;
+                    }
+                    self.expect(lexer::RightBracket);
+                    break;
+                },
+            }
+        }
+
+        // 0 length arrays are invalid
+        if elements.len() == 0 {
+            self.logger.report_error(format!("cannot define array of length 0"),
+                    InputSpan::new(span_start, self.current_pos()));
+            self.fatal_error();
+        }
+
+        let element_type = elements[0].rtype.clone();
+        let length = elements.len();
+
+        let array_expr = ast::StaticArray {
+            elements: elements,
+            span: InputSpan::new(span_start, self.current_pos()),
+        };
+
+        ast::Expression {
+            expr: box ast::StaticArrayExpr(array_expr),
+            rtype: ast::StaticArrayType(box element_type, length as i32),
+            span: InputSpan::new(span_start, self.current_pos()),
+        }
+    }
+
+    fn handle_num(&mut self, val: i32, span_start: InputPos) -> ast::Expression {
         ast::Expression {
             expr: box ast::LitNumExpr(val),
             rtype: ast::Primitive(ast::IntType),

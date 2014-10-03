@@ -3,7 +3,7 @@ use std::fmt;
 
 use ast;
 use dlx::codegen;
-use error::{InputPos, InputSpan};
+use error::InputSpan;
 
 type TypeId = uint;
 
@@ -65,7 +65,7 @@ impl BaseType {
 #[deriving(Show, Clone, PartialEq)]
 pub enum Type {
     Normal(TypeId),
-    Array(Box<Type>, u16),
+    StaticArray(Box<Type>, u16),
     Pointer(Box<Type>),
     Any,
     Bottom,
@@ -81,9 +81,15 @@ impl TypeTable {
         match *ast_type {
             ast::VariableType(ref name) => scope.get_ident(name, InputSpan::invalid()).rtype(),
             ast::Pointer(ref inner) => Pointer(box self.resolve_type(scope, &**inner)),
+            ast::StaticArrayType(ref inner, size) => {
+                StaticArray(box self.resolve_type(scope, &**inner), size as u16)
+            },
             ast::DerefType(ref inner) => {
                 match self.resolve_type(scope, &**inner) {
                     Pointer(inner) => {
+                        *inner.clone()
+                    },
+                    StaticArray(inner, _) => {
                         *inner.clone()
                     },
                     invalid => {
@@ -93,14 +99,16 @@ impl TypeTable {
             },
             ast::Primitive(ast::BottomType) => Bottom,
             ast::Primitive(ast::AnyType) => Any,
-            ref resolved_ast => Normal(self.type_map[ast_type.clone()]),
+
+            // Otherwise this is a normal variable
+            _ => Normal(self.type_map[ast_type.clone()]),
         }
     }
 
     pub fn size_of(&self, type_: &Type) -> u16 {
         match *type_ {
             Normal(id) => self.types[id].size(),
-            Array(ref inner, size) => self.size_of(&**inner) * size,
+            StaticArray(ref inner, size) => self.size_of(&**inner) * size,
             Pointer(..) => 4,
             Bottom => fail!("ICE: Attempted to determine size of bottom type"),
             Any => fail!("ICE: Attempted to determine size of any type"),

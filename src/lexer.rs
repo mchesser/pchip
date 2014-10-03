@@ -52,7 +52,7 @@ pub enum TokenValue {
 
     True,
     False,
-    LitNum(int),
+    LitNum(i32),
     LitString(String),
     Ident(String),
 }

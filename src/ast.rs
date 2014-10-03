@@ -38,6 +38,7 @@ pub enum PrimitiveType {
 pub enum Type {
     Primitive(PrimitiveType),
     Pointer(Box<Type>),
+    StaticArrayType(Box<Type>, i32),
     DerefType(Box<Type>),
     FieldRefType(Box<Type>, String),
     UserType(String),
@@ -66,7 +67,8 @@ pub enum Expr {
     AssignExpr(Assignment),
     VariableExpr(String),
     StructInitExpr(StructInit),
-    LitNumExpr(int),
+    LitNumExpr(i32),
+    StaticArrayExpr(StaticArray),
     FieldRefExpr(FieldRef),
     ArrayIndexExpr(ArrayIndex),
     RefExpr(String),
@@ -156,6 +158,12 @@ pub struct Assignment {
 pub struct StructInit {
     pub type_name: String,
     pub field_init: Vec<(String, Expression)>,
+    pub span: InputSpan,
+}
+
+#[deriving(Show, Clone)]
+pub struct StaticArray {
+    pub elements: Vec<Expression>,
     pub span: InputSpan,
 }
 
