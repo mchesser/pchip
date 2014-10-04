@@ -218,7 +218,7 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start
             ast::LetItem(let_item) => {
                 let id = VarIdentId(global.vars.len());
                 let name = let_item.name.clone();
-                let label = format!("{}{}", name, data.next_unique_id());
+                let label = format!("{}", name);
                 global.add_ident(name, id, let_item.span.clone());
                 let rtype = data.resolve_type(&global, &let_item.var_type);
                 let is_const = let_item.is_const;
@@ -520,9 +520,7 @@ impl<'a> CodeData<'a> {
                 };
                 self.compile_static_array(scope, &static_array);
             },
-            ast::StructInitExpr(ref inner) => {
-                unimplemented!();
-            },
+            ast::StructInitExpr(ref inner) => self.compile_struct_init(scope, inner),
             ast::LitNumExpr(value) => {
                 self.instructions.push(asm::AddSignedValue(RESULT_REG, ZERO_REG, value as i16));
             },
@@ -542,27 +540,33 @@ impl<'a> CodeData<'a> {
         let target_type = self.resolve_type(scope, &field_ref.target.rtype);
         let target_base_type = self.type_table.base_type(&target_type);
 
-        // Find the offset of the field
-        let field_offset = match *target_base_type {
+        let (field_offset, _) = self.find_field(target_base_type, &field_ref.field,
+            field_ref.span.clone());
+
+        // Add the offset to the target address
+        self.instructions.push(asm::AddUnsignedValue(RESULT_REG, RESULT_REG, field_offset));
+    }
+
+    fn find_field(&self, target_type: &types::BaseType, field: &String, span: InputSpan)
+        -> (u16, types::Type)
+    {
+        match *target_type {
             types::Composite(ref inner) => {
-                match inner.fields.find(&field_ref.field) {
-                    Some(&(offset, _)) => offset,
+                match inner.fields.find(field) {
+                    Some(&(offset, ref type_)) => (offset, type_.clone()),
                     None => {
                         self.logger.report_error(format!("type `{}` has no field {}", target_type,
-                            field_ref.field), field_ref.span);
+                            field), span);
                         self.fatal_error();
                     }
                 }
             },
             ref invalid => {
-                self.logger.report_error(format!("type `{}` has no field {}", invalid,
-                    field_ref.field), field_ref.span);
+                self.logger.report_error(format!("type `{}` has no field {}", invalid, field),
+                    span);
                 self.fatal_error();
             }
-        };
-
-        // Add the offset to the target address
-        self.instructions.push(asm::AddUnsignedValue(RESULT_REG, RESULT_REG, field_offset));
+        }
     }
 
     fn compile_array_index(&mut self, scope: &mut Scope, index_expr: &ast::ArrayIndex) {
@@ -836,6 +840,37 @@ impl<'a> CodeData<'a> {
         self.copy_var(&target_type, TEMP_REG, RESULT_REG);
     }
 
+    fn compile_struct_init(&mut self, scope: &mut Scope, struct_init: &ast::StructInit) {
+        // Determine the type of the struct
+        let struct_type = self.resolve_type(scope, &ast::UserType(struct_init.type_name.clone()));
+        let struct_base_type = self.type_table.base_type(&struct_type).clone();
+        let struct_size = self.size_of(&struct_type);
+
+        // Reserve memory for the struct
+        self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER, struct_size));
+
+        for &(ref field_name, ref expression) in struct_init.field_init.iter() {
+            let (field_offset, field_type) = self.find_field(&struct_base_type, field_name,
+                struct_init.span.clone());
+
+            self.compile_expression(scope, expression);
+
+            // Check that the types match
+            self.check_type(&self.resolve_type(scope, &expression.rtype), &field_type,
+                struct_init.span.clone());
+
+            self.instructions.push(asm::AddSignedValue(TEMP_REG, STACK_POINTER,
+                (field_offset as i16) - (struct_size as i16)));
+            self.copy_var(&field_type, RESULT_REG, TEMP_REG);
+        }
+
+        // Unreserve the memory from the struct
+        self.instructions.push(asm::AddSignedValue(STACK_POINTER, STACK_POINTER,
+            -(struct_size as i16)));
+        // Return a pointer to the struct
+        self.instructions.push(asm::AddUnsigned(RESULT_REG, STACK_POINTER, ZERO_REG));
+    }
+
     fn compile_static_array(&mut self, scope: &mut Scope, array: &ast::StaticArray) {
         // Special case for a zero sized array
         if array.elements.len() == 0 {
@@ -871,8 +906,10 @@ impl<'a> CodeData<'a> {
                 pad as u16));
         }
 
+        // Unreserve the memory from the array
+        self.instructions.push(asm::AddSignedValue(STACK_POINTER, STACK_POINTER, -offset));
         // Return a pointer to the first element
-        self.instructions.push(asm::AddSignedValue(RESULT_REG, STACK_POINTER, -offset));
+        self.instructions.push(asm::AddUnsigned(RESULT_REG, STACK_POINTER, ZERO_REG));
     }
 
     fn copy_var(&mut self, var_type: &types::Type, from: asm::RegId, to: asm::RegId) {

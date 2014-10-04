@@ -40,6 +40,10 @@ fn main() {
     for inst in code.into_iter() {
         match inst {
             dlx::asm::Label(label) => {
+                if space != 0 {
+                    program_string.push_char('\n');
+                    space = 0;
+                }
                 program_string.push_str(label.as_slice());
                 space += label.len();
             },
