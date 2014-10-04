@@ -724,10 +724,17 @@ impl<'a> Parser<'a> {
             lexer::Else => {
                 self.bump();
                 if self.peek() == lexer::If {
-                    fail!("FIXME: Handle else if statements");
+                    self.bump();
+                    let else_if_span_start = self.current_pos();
+                    let inner_block = ast::Block {
+                        statements: vec![self.parse_if(else_if_span_start.clone())],
+                        span: InputSpan::new(else_if_span_start, self.current_pos()),
+                    };
+                    Some(inner_block)
                 }
-
-                Some(self.parse_block())
+                else {
+                    Some(self.parse_block())
+                }
             },
             _ => None,
         };

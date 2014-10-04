@@ -212,6 +212,21 @@ impl<'a> TypeGenData<'a> {
         new_type
     }
 
+    fn full_resolve_type(&mut self, name: &String) -> Type {
+        let (id, struct_decl) = match self.unresolved_map.find(name) {
+            // This type is in still in unresolved list so we need to resolve it
+            Some(&(id, ref struct_decl)) => (id, struct_decl.clone()),
+
+            // Already resolved this type due to a dependency.
+            None => {
+                return self.type_table.resolve_type(&self.fake_scope, &ast::UserType(name.clone()));
+            },
+        };
+        let resolved = Composite(box self.gen_struct_type(&struct_decl));
+        *self.type_table.types.get_mut(id) = resolved;
+        Normal(id)
+    }
+
     fn gen_type(&mut self, ast_type: &ast::Type) -> Type {
         match *ast_type {
             // If this type is a pointer, we don't care if it hasn't been defined yet
@@ -219,21 +234,12 @@ impl<'a> TypeGenData<'a> {
                 Pointer(box self.type_table.resolve_type(&self.fake_scope, &**inner))
             },
 
-            // If the type is a user defined type, then it must be defined before we can continue
-            ast::UserType(ref name) => {
-                let (id, struct_decl) = match self.unresolved_map.find(name) {
-                    // This type is in still in unresolved list so we need to resolve it
-                    Some(&(id, ref struct_decl)) => (id, struct_decl.clone()),
+            // If the type is a user defined type, then it must be fully resolved before we can
+            // continue
+            ast::UserType(ref name) => self.full_resolve_type(name),
 
-                    // Already resolved this type due to a dependency.
-                    None => {
-                        return self.type_table.resolve_type(&self.fake_scope,
-                            &ast::UserType(name.clone()));
-                    },
-                };
-                let resolved = Composite(box self.gen_struct_type(&struct_decl));
-                *self.type_table.types.get_mut(id) = resolved;
-                Normal(id)
+            ast::StaticArrayType(ref inner, size) => {
+                StaticArray(box self.gen_type(&**inner), size as u16)
             },
 
             // Primitive types should already be resolved
@@ -242,7 +248,7 @@ impl<'a> TypeGenData<'a> {
             },
 
             // No other types are valid here
-            ref invalid => fail!("ERROR unexpected type: {}", invalid),
+            ref invalid => fail!("unexpected type: {}", invalid),
         }
     }
 }

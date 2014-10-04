@@ -543,6 +543,11 @@ impl<'a> CodeData<'a> {
 
         // Evaluate the index
         self.compile_expression(scope, &index_expr.index);
+
+        // Check that we are indexing with the correct type
+        let index_type = self.resolve_type(scope, &index_expr.index.rtype);
+        self.check_type(&index_type, &INT_TYPE, index_expr.index.span.clone());
+
         // Multiply by the size of the target type
         let type_size = self.size_of(target_type.deref());
         self.multiply_by(type_size as uint);
@@ -565,11 +570,11 @@ impl<'a> CodeData<'a> {
     }
 
     fn compile_if(&mut self, scope: &mut Scope, if_statement: &ast::IfStatement) {
+        self.compile_expression(scope, &if_statement.condition);
+
         // Check that the expression returns a boolean type
         let cond_type = self.resolve_type(scope, &if_statement.condition.rtype);
         self.check_type(&cond_type, &BOOL_TYPE, if_statement.span.clone());
-
-        self.compile_expression(scope, &if_statement.condition);
 
         let else_label = self.anon_label();
         let end_label = match if_statement.else_block {
@@ -586,16 +591,16 @@ impl<'a> CodeData<'a> {
 
         match if_statement.else_block {
             Some(ref block) => {
-                // Check that both sides return the same type
-                let else_rtype = self.resolve_type(scope, &block.rtype());
-                self.check_type(&else_rtype, &then_rtype, block.span.clone());
-
                 // If there is an else block we need to add a jump from the then block to the
                 // end label, and add a label for the else part
                 self.instructions.push(asm::Jump(end_label.clone()));
                 self.instructions.push(asm::Label(else_label));
                 // Then compile the else block
                 self.compile_block(scope, block);
+
+                // Check that both sides return the same type
+                let else_rtype = self.resolve_type(scope, &block.rtype());
+                self.check_type(&else_rtype, &then_rtype, block.span.clone());
             }
             None => {
                 // If the else block was left unspecified, then the if statement must return the
@@ -612,29 +617,28 @@ impl<'a> CodeData<'a> {
     /// Note: We directly compile for loops instead of de-sugaring them into a normal loop with an
     /// if break, for efficiency.
     fn compile_for(&mut self, scope: &mut Scope, for_statement: &ast::ForLoopStatement) {
-        // Check that the body of the loop returns the correct type
-        let body_rtype = self.resolve_type(scope, &for_statement.body.rtype());
-        self.check_type(&body_rtype, &UNIT_TYPE, for_statement.span.clone());
+        let var_size = self.size_of(&INT_TYPE) as u16;
 
-        // Check that the start expression has the correct type
-        let start_type = self.resolve_type(scope, &for_statement.start.rtype);
-        self.check_type(&start_type, &INT_TYPE, for_statement.start.span.clone());
         // Compile the expression for the range start
         self.compile_expression(scope, &for_statement.start);
         // Write the start expression to the stack
         self.instructions.push(asm::Store32(asm::Const(0), STACK_POINTER, RESULT_REG));
 
-        // Check that the end expression has the correct type
-        let end_type = self.resolve_type(scope, &for_statement.end.rtype);
-        let var_size = self.size_of(&end_type) as u16;
-        self.check_type(&end_type, &INT_TYPE, for_statement.end.span.clone());
+        // Check that the start expression has the correct type
+        let start_type = self.resolve_type(scope, &for_statement.start.rtype);
+        self.check_type(&start_type, &INT_TYPE, for_statement.start.span.clone());
+
         // Compile the expression for the range end
         self.compile_expression(scope, &for_statement.end);
         // Write the end expression to the stack
         self.instructions.push(asm::Store32(asm::Const(var_size as i16), STACK_POINTER,
             RESULT_REG));
 
-        // Increment the stack
+        // Check that the end expression has the correct type
+        let end_type = self.resolve_type(scope, &for_statement.end.rtype);
+        self.check_type(&end_type, &INT_TYPE, for_statement.end.span.clone());
+
+        // Increment the stack so the iteration variable and the end value are not overwritten
         self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER, var_size * 2));
 
         // Create a fake ast so the we can refer to the variable inside the loop
@@ -686,13 +690,13 @@ impl<'a> CodeData<'a> {
         // Restore the stack
         self.instructions.push(asm::SubUnsignedValue(STACK_POINTER, STACK_POINTER, var_size * 2));
         scope.next_offset -= var_size as i16 * 2;
+
+        // Check that the body of the loop returns the correct type
+        let body_rtype = self.resolve_type(scope, &for_statement.body.rtype());
+        self.check_type(&body_rtype, &UNIT_TYPE, for_statement.span.clone());
     }
 
     fn compile_loop(&mut self, scope: &mut Scope, loop_statement: &ast::LoopStatement) {
-        // Check that the body of the loop returns the correct type
-        let body_rtype = self.resolve_type(scope, &loop_statement.body.rtype());
-        self.check_type(&body_rtype, &UNIT_TYPE, loop_statement.span.clone());
-
         let start_label = self.anon_label();
         self.instructions.push(asm::Label(start_label.clone()));
 
@@ -708,6 +712,10 @@ impl<'a> CodeData<'a> {
         // Add end label
         let end_label = scope.loop_ends.pop().expect("ICE: Missing label after loop");
         self.instructions.push(asm::Label(end_label));
+
+        // Check that the body of the loop returns the correct type
+        let body_rtype = self.resolve_type(scope, &loop_statement.body.rtype());
+        self.check_type(&body_rtype, &UNIT_TYPE, loop_statement.span.clone());
     }
 
     fn compile_call(&mut self, scope: &mut Scope, call: &ast::FunctionCall) {
@@ -770,15 +778,14 @@ impl<'a> CodeData<'a> {
     }
 
     fn compile_assign(&mut self, scope: &mut Scope, assignment: &ast::Assignment) {
-        let target_type = self.resolve_type(scope, &assignment.target.rtype);
-
-        // Check that the rhs result matches the target
-        self.check_type(&self.resolve_type(scope, &assignment.rhs.rtype), &target_type,
-            assignment.span.clone());
-
         // Compile the rhs expression and store the result in the location found
         self.compile_expression(scope, &assignment.rhs);
         self.instructions.push(asm::AddSigned(TEMP_REG, RESULT_REG, ZERO_REG));
+
+        // Check that the rhs result matches the target
+        let target_type = self.resolve_type(scope, &assignment.target.rtype);
+        self.check_type(&self.resolve_type(scope, &assignment.rhs.rtype), &target_type,
+            assignment.span.clone());
 
         // Get the address of where we want to place the variable
         let valid_address = self.compile_address(scope, &assignment.target);
