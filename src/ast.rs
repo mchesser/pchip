@@ -77,6 +77,7 @@ pub enum Expr {
     ArrayIndexExpr(ArrayIndex),
     RefExpr(Expression),
     DerefExpr(Expression),
+    CastExpr(Expression),
 
     AsmOpExpr(String),
     EmptyExpr,

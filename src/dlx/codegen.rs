@@ -82,6 +82,7 @@ impl Function {
 enum Location {
     Label(LabelId),
     Offset(i16),
+    Register(RegId),
 }
 
 struct Variable {
@@ -296,7 +297,12 @@ impl<'a> CodeData<'a> {
         match scope.vars[var_id].ast.assignment {
             // Initialized variables
             Some(ref expr) => {
-                match *expr.rhs.expr {
+                let rhs_expr = match *expr.rhs.expr {
+                    ast::CastExpr(ref inner) => &*inner.expr,
+                    ref other => other,
+                };
+
+                match *rhs_expr {
                     ast::LitNumExpr(value) => {
                         self.instructions.push(asm::AllocateWords(vec![value as i32]));
                     },
@@ -328,7 +334,10 @@ impl<'a> CodeData<'a> {
                     },
 
                     // TODO: Handle other types of static data
-                    _ => unimplemented!(),
+                    ref invalid => {
+                        println!("{}", invalid);
+                        unimplemented!();
+                    },
                 }
             },
             // Uninitialized variables
@@ -432,7 +441,7 @@ impl<'a> CodeData<'a> {
                         self.compile_expression(scope, inner);
 
                         // Then dereference it
-                        self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), RESULT_REG));
+                        self.load_var(inner_type.deref(), &Register(RESULT_REG));
                     },
                     types::StaticArray(..) => {
                         // Evaluate the inner expression
@@ -448,11 +457,13 @@ impl<'a> CodeData<'a> {
             },
             ast::FieldRefExpr(ref inner) => {
                 self.compile_field_ref(scope, inner);
-                self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), RESULT_REG));
+                let inner_type = self.resolve_type(scope, &expression.rtype);
+                self.load_var(&inner_type, &Register(RESULT_REG));
             },
             ast::ArrayIndexExpr(ref inner) => {
                 self.compile_array_index(scope, inner);
-                self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), RESULT_REG));
+                let inner_type = self.resolve_type(scope, &expression.rtype);
+                self.load_var(&inner_type, &Register(RESULT_REG));
             },
             ast::IfExpr(ref inner) => self.compile_if(scope, inner),
             ast::ForLoopExpr(ref inner) => self.compile_for(scope, inner),
@@ -529,7 +540,8 @@ impl<'a> CodeData<'a> {
             },
             ast::AsmOpExpr(ref inner) => {
                 self.instructions.push(asm::RawAsm(inner.clone()));
-            }
+            },
+            ast::CastExpr(ref inner) => self.compile_expression(scope, inner),
             ast::EmptyExpr => {},
         }
     }
@@ -589,7 +601,7 @@ impl<'a> CodeData<'a> {
         self.check_type(&index_type, &INT_TYPE, index_expr.index.span.clone());
 
         // Multiply by the size of the target type
-        let type_size = self.size_of(target_type.deref());
+        let type_size = self.unaligned_size_of(target_type.deref());
         self.multiply_by(type_size as uint);
 
         // Either replace or add to the current address
@@ -805,6 +817,7 @@ impl<'a> CodeData<'a> {
         scope.add_ident(let_statement.name.clone(), id, let_statement.span);
 
         let rtype = self.resolve_type(scope, &let_statement.var_type);
+
         let var = Variable::new(let_statement.clone(), rtype.clone(), Offset(scope.next_offset),
             let_statement.is_const);
         scope.next_offset += self.size_of(&rtype) as i16;
@@ -978,6 +991,9 @@ impl<'a> CodeData<'a> {
                         self.instructions.push(asm::Load8(RESULT_REG, asm::Const(amount),
                             FRAME_POINTER));
                     },
+                    Register(id) => {
+                        self.instructions.push(asm::Load8(RESULT_REG, asm::Const(0), id));
+                    },
                 }
             },
 
@@ -991,6 +1007,9 @@ impl<'a> CodeData<'a> {
                     Offset(amount) => {
                         self.instructions.push(asm::Load32(RESULT_REG, asm::Const(amount),
                             FRAME_POINTER));
+                    },
+                    Register(id) => {
+                        self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), id));
                     },
                 }
             },
@@ -1008,6 +1027,9 @@ impl<'a> CodeData<'a> {
             },
             Offset(offset) => {
                 self.instructions.push(asm::AddSignedValue(RESULT_REG, FRAME_POINTER, offset));
+            },
+            Register(id) => {
+                self.instructions.push(asm::AddUnsigned(RESULT_REG, id, ZERO_REG));
             },
         }
     }

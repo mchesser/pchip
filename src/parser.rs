@@ -497,9 +497,11 @@ impl<'a> Parser<'a> {
         match self.peek() {
             lexer::As => {
                 self.bump();
-                let mut expression = expression;
-                expression.rtype = self.parse_type();
-                expression
+                ast::Expression {
+                    expr: box ast::CastExpr(expression),
+                    rtype: self.parse_type(),
+                    span: InputSpan::new(span_start, self.current_pos()),
+                }
             },
 
             lexer::Assignment => {
