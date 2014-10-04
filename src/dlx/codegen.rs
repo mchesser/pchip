@@ -415,28 +415,13 @@ impl<'a> CodeData<'a> {
     fn compile_expression(&mut self, scope: &mut Scope, expression: &ast::Expression) {
         let span = expression.span;
         match *expression.expr {
-            ast::RefExpr(ref target) => {
-                // Get the identifier corresponding to the target
-                let target_ident = match scope.get_ident(target, span) {
-                    FnIdent(..) => {
-                        self.logger.report_error(format!("attempted to take reference to function"),
-                            span);
-                        self.fatal_error();
-                    },
-                    VarIdent(ident) => ident,
-                };
-                // Take a reference to this variable
-                match target_ident.location {
-                    Label(ref name) => {
-                        let asm = format!("        addui,r{},r{},{}", RESULT_REG, ZERO_REG, name);
-                        self.instructions.push(asm::RawAsm(asm));
-                    },
-                    Offset(offset) => {
-                        self.instructions.push(asm::AddSignedValue(RESULT_REG, FRAME_POINTER,
-                            offset))
-                    },
+            ast::RefExpr(ref inner) => {
+                let valid_address = self.compile_address(scope, inner);
+                if !valid_address {
+                    self.logger.report_error(format!("Cannot take reference to target expression"),
+                        span);
+                    self.fatal_error();
                 }
-
             },
             ast::DerefExpr(ref inner) => {
                 // Check that we can dereference the expression
@@ -503,6 +488,9 @@ impl<'a> CodeData<'a> {
                 unimplemented!();
             },
             ast::LitNumExpr(value) => {
+                self.instructions.push(asm::AddSignedValue(RESULT_REG, ZERO_REG, value as i16));
+            },
+            ast::LitCharExpr(value) => {
                 self.instructions.push(asm::AddSignedValue(RESULT_REG, ZERO_REG, value as i16));
             },
             ast::AsmOpExpr(ref inner) => {
@@ -793,30 +781,11 @@ impl<'a> CodeData<'a> {
         self.instructions.push(asm::AddSigned(TEMP_REG, RESULT_REG, ZERO_REG));
 
         // Get the address of where we want to place the variable
-        let target_span = assignment.target.span.clone();
-        match *assignment.target.expr {
-            // Assignment to an ordinary variable, we want to assign to the address of this variable
-            ast::VariableExpr(ref name) => {
-                let var = scope.get_ident(name, target_span).unwrap_var();
-                self.address_of(&var.location);
-            },
-
-            // Assignment to a dereference of a pointer
-            // The inner expression contains the address of the place we want to assign to
-            ast::DerefExpr(ref inner) => self.compile_expression(scope, inner),
-
-            // Assignment to an index of an array
-            ast::ArrayIndexExpr(ref inner) => self.compile_array_index(scope, inner),
-
-            // Assignment to a field of a struct
-            ast::FieldRefExpr(ref inner) => self.compile_field_ref(scope, inner),
-
-            // Assignment to anything else is invalid
-            _ => {
-                self.logger.report_error(format!("illegal left-hand side expression"),
-                    assignment.target.span.clone());
-                self.fatal_error();
-            },
+        let valid_address = self.compile_address(scope, &assignment.target);
+        if !valid_address {
+            self.logger.report_error(format!("illegal left-hand side expression"),
+                assignment.target.span.clone());
+            self.fatal_error();
         };
 
         // We now have the result of the rhs in TEMP_REG and the address we want to assign to in
@@ -849,9 +818,47 @@ impl<'a> CodeData<'a> {
         }
     }
 
+    fn compile_address(&mut self, scope: &mut Scope, expression: &ast::Expression) -> bool {
+        let span = expression.span;
+        match *expression.expr {
+            // Address of an ordinary variable
+            ast::VariableExpr(ref name) => {
+                let var = scope.get_ident(name, span).unwrap_var();
+                self.address_of(&var.location);
+            },
+
+            // Address of a dereference (aka don't dereference)
+            ast::DerefExpr(ref inner) => self.compile_expression(scope, inner),
+
+            // Address of an array index
+            ast::ArrayIndexExpr(ref inner) => self.compile_array_index(scope, inner),
+
+            // Address of a struct field
+            ast::FieldRefExpr(ref inner) => self.compile_field_ref(scope, inner),
+
+            // Nothing else has a proper address
+            _ => return false,
+        }
+        true
+    }
+
     fn load_var(&mut self, var_type: &types::Type, location: &Location) {
         match *var_type {
-            // These types can be stored in registers so we load their value into the result reg
+            // These types are byte sized
+            CHAR_TYPE => {
+                match *location {
+                    Label(ref label) => {
+                        self.instructions.push(asm::Load8(RESULT_REG, asm::Unknown(label.clone()),
+                            ZERO_REG));
+                    },
+                    Offset(amount) => {
+                        self.instructions.push(asm::Load8(RESULT_REG, asm::Const(amount),
+                            FRAME_POINTER));
+                    },
+                }
+            },
+
+            // These types are word sized
             INT_TYPE | BOOL_TYPE | types::Pointer(..) => {
                 match *location {
                     Label(ref label) => {

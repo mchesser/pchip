@@ -67,12 +67,15 @@ pub enum Expr {
     AssignExpr(Assignment),
     VariableExpr(String),
     StructInitExpr(StructInit),
+
     LitNumExpr(i32),
+    LitCharExpr(char),
     LitStringExpr(String),
     StaticArrayExpr(StaticArray),
+
     FieldRefExpr(FieldRef),
     ArrayIndexExpr(ArrayIndex),
-    RefExpr(String),
+    RefExpr(Expression),
     DerefExpr(Expression),
 
     AsmOpExpr(String),

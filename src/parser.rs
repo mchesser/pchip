@@ -386,18 +386,9 @@ impl<'a> Parser<'a> {
             lexer::Amp => {
                 let target = self.parse_expression();
                 let rtype = ast::Pointer(box target.rtype.clone());
-                let ref_target = match *target.expr {
-                    ast::VariableExpr(var_name) => var_name,
-                    invalid => {
-                        self.logger.report_error(format!("expected `<Variable>` but found `{}`",
-                            invalid), InputSpan::new(span_start, self.current_pos()));
-                        println!("Try creating a temporary before taking a reference")
-                        self.fatal_error();
-                    },
-                };
 
                 ast::Expression {
-                    expr: box ast::RefExpr(ref_target),
+                    expr: box ast::RefExpr(target),
                     rtype: rtype,
                     span: InputSpan::new(span_start, self.current_pos()),
                 }
@@ -423,6 +414,13 @@ impl<'a> Parser<'a> {
             },
             lexer::Ident(name) => self.handle_ident(name.to_string(), span_start),
             lexer::LitNum(value) => self.handle_num(value, span_start),
+            lexer::LitChar(value) => {
+                ast::Expression {
+                    expr: box ast::LitCharExpr(value),
+                    rtype: ast::Primitive(ast::CharType),
+                    span: InputSpan::new(span_start, self.current_pos()),
+                }
+            },
             lexer::LitString(value) => {
                 let len = value.len() as i32;
                 ast::Expression {
@@ -476,6 +474,13 @@ impl<'a> Parser<'a> {
             lexer::Break => self.parse_break(span_start),
             lexer::Return => self.parse_return(span_start),
             lexer::Asm => self.parse_asm(span_start),
+            lexer::SemiColon => {
+                ast::Expression {
+                    expr: box ast::EmptyExpr,
+                    rtype: ast::Primitive(ast::UnitType),
+                    span: InputSpan::new(span_start, self.current_pos()),
+                }
+            },
             invalid => {
                 self.logger.report_error(format!("expected `<Expression>` but found `{}`", invalid),
                     InputSpan::new(span_start, self.current_pos()));

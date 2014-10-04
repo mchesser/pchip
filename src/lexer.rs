@@ -54,6 +54,7 @@ pub enum TokenValue {
     True,
     False,
     LitNum(i32),
+    LitChar(char),
     LitString(String),
     Null,
     Ident(String),
@@ -200,6 +201,19 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                 result
             },
 
+            '\'' => {
+                if len < 3 {
+                    fail!("Invalid char literal");
+                }
+                self.bump();
+                let result = LitChar(self.remaining.char_at(0));
+                self.bump();
+                if self.remaining.char_at(0) != '\'' {
+                    fail!("Unclosed '");
+                }
+                result
+            },
+
             _ => {
                 token_len = scan_token(self.remaining);
                 let token_str = self.remaining.slice_to(token_len);
@@ -245,7 +259,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
 fn scan_token(string: &str) -> uint {
     static TOKEN_BOUNDS: &'static [char] = &[
         ' ', '\t', '\n', '\r', '#', ':', ';', ',', '(', ')', '{', '}', '[', ']', '.', '*', '&', '=',
-        '+', '-', '"'
+        '+', '-', '"', '\'',
     ];
 
     match string.find(TOKEN_BOUNDS) {
