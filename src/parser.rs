@@ -85,7 +85,12 @@ impl<'a> Parser<'a> {
             lexer::Fn => ast::FunctionItem(self.parse_function()),
             lexer::Struct => ast::StructItem(self.parse_struct_decl()),
             lexer::Let => {
-                let item = ast::LetItem(self.parse_let());
+                let item = ast::LetItem(self.parse_let(false));
+                self.expect(lexer::SemiColon);
+                item
+            },
+            lexer::Const => {
+                let item = ast::LetItem(self.parse_let(true));
                 self.expect(lexer::SemiColon);
                 item
             },
@@ -198,7 +203,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_let(&mut self) -> ast::LetStatement {
+    fn parse_let(&mut self, is_const: bool) -> ast::LetStatement {
         let span_start = self.current_pos();
         let (name, opt_type) = self.parse_var_with_type();
 
@@ -249,6 +254,7 @@ impl<'a> Parser<'a> {
             name: name,
             var_type: type_,
             assignment: opt_assignment,
+            is_const: is_const,
             span: InputSpan::new(span_start, self.current_pos()),
         }
     }
@@ -295,6 +301,7 @@ impl<'a> Parser<'a> {
                         self.fatal_error();
                     },
                 };
+                self.expect(lexer::RightBracket);
                 ast::StaticArrayType(box inner_type, size)
             },
 
@@ -343,16 +350,14 @@ impl<'a> Parser<'a> {
             }
             else {
                 let expression = self.parse_expression();
+                statements.push(expression);
+
                 if self.peek() != lexer::RightBrace {
                     if !self.fake_semicolon {
                         self.expect(lexer::SemiColon);
                     }
-                    self.fake_semicolon = false;
-                    statements.push(expression);
                 }
-                else {
-                    statements.push(expression);
-                }
+                self.fake_semicolon = false;
             }
         }
 
@@ -418,6 +423,14 @@ impl<'a> Parser<'a> {
             },
             lexer::Ident(name) => self.handle_ident(name.to_string(), span_start),
             lexer::LitNum(value) => self.handle_num(value, span_start),
+            lexer::LitString(value) => {
+                let len = value.len() as i32;
+                ast::Expression {
+                    expr: box ast::LitStringExpr(value),
+                    rtype: ast::StaticArrayType(box ast::Primitive(ast::CharType), len),
+                    span: InputSpan::new(span_start, self.current_pos()),
+                }
+            },
             lexer::True => {
                 ast::Expression {
                     expr: box ast::LitNumExpr(1),
@@ -429,6 +442,13 @@ impl<'a> Parser<'a> {
                 ast::Expression {
                     expr: box ast::LitNumExpr(0),
                     rtype: ast::Primitive(ast::BoolType),
+                    span: InputSpan::new(span_start, self.current_pos()),
+                }
+            },
+            lexer::Null => {
+                ast::Expression {
+                    expr: box ast::LitNumExpr(0),
+                    rtype: ast::Pointer(box ast::Primitive(ast::AnyType)),
                     span: InputSpan::new(span_start, self.current_pos()),
                 }
             },
@@ -444,7 +464,7 @@ impl<'a> Parser<'a> {
             },
             lexer::Let => {
                 ast::Expression {
-                    expr: box ast::LetExpr(self.parse_let()),
+                    expr: box ast::LetExpr(self.parse_let(false)),
                     rtype: ast::Primitive(ast::UnitType),
                     span: InputSpan::new(span_start, self.current_pos()),
                 }
@@ -690,12 +710,15 @@ impl<'a> Parser<'a> {
     /// Parse an if statement defined by:
     ///     <IfStatement> = if <Expression> <Block>
     fn parse_if(&mut self, span_start: InputPos) -> ast::Expression {
+        self.expect(lexer::LeftParen);
         let condition = self.parse_expression();
+        self.expect(lexer::RightParen);
+
         let body = self.parse_block();
         let else_block = match self.peek() {
             lexer::Else => {
                 self.bump();
-                if self.next_token() == lexer::If {
+                if self.peek() == lexer::If {
                     fail!("FIXME: Handle else if statements");
                 }
 
@@ -785,7 +808,10 @@ impl<'a> Parser<'a> {
 
     fn parse_while(&mut self, span_start: InputPos) -> ast::Expression {
         // Transform the while statement into a loop with a if statement
+        self.expect(lexer::LeftParen);
         let condition = self.parse_expression();
+        self.expect(lexer::RightParen);
+
         let break_body = ast::Block {
             statements: vec![ast::Expression {
                 expr: box ast::Break,

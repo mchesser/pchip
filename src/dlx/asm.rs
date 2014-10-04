@@ -113,6 +113,8 @@ pub enum Instruction {
     AllocateHalfWords(Vec<i16>),
     AllocateWords(Vec<i32>),
     AllocateSpace(u32),
+    AllocateAscii(String),
+    Align(i16),
 
     RawAsm(String),
 }
@@ -209,6 +211,8 @@ impl Instruction {
                 base
             },
             AllocateSpace(amount) => format!(".space  {}", amount),
+            AllocateAscii(value) => format!(".ascii  \"{}\"", value),
+            Align(value) => format!(".align  {}", value),
 
             RawAsm(ref data) => data.clone(),
         }

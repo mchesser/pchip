@@ -11,6 +11,7 @@ pub enum TokenValue {
     RightBracket,
 
     Let,
+    Const,
     Assignment,
     RightArrow,
 
@@ -54,6 +55,7 @@ pub enum TokenValue {
     False,
     LitNum(i32),
     LitString(String),
+    Null,
     Ident(String),
 }
 
@@ -203,6 +205,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                 let token_str = self.remaining.slice_to(token_len);
                 match token_str {
                     "let"    => Let,
+                    "const"  => Const,
                     "if"     => If,
                     "for"    => For,
                     "range"  => Range,
@@ -218,6 +221,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                     "as"     => As,
                     "true"   => True,
                     "false"  => False,
+                    "null"   => Null,
                     "int"    => Int,
                     "char"   => Char,
                     "bool"   => Bool,

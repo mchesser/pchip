@@ -68,6 +68,7 @@ pub enum Expr {
     VariableExpr(String),
     StructInitExpr(StructInit),
     LitNumExpr(i32),
+    LitStringExpr(String),
     StaticArrayExpr(StaticArray),
     FieldRefExpr(FieldRef),
     ArrayIndexExpr(ArrayIndex),
@@ -144,6 +145,7 @@ pub struct LetStatement {
     pub name: String,
     pub var_type: Type,
     pub assignment: Option<Assignment>,
+    pub is_const: bool,
     pub span: InputSpan,
 }
 

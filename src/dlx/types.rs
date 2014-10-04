@@ -44,6 +44,7 @@ impl fmt::Show for CompositeType {
 pub enum BaseType {
     Bool,
     Int,
+    Char,
     Unit,
     Composite(Box<CompositeType>),
 }
@@ -55,6 +56,7 @@ impl BaseType {
         match *self {
             Bool => 4,
             Int => 4,
+            Char => 1,
             Unit => 0,
             Composite(ref tp) => tp.size,
         }
@@ -134,8 +136,8 @@ impl TypeTable {
 
     pub fn size_of(&self, type_: &Type) -> u16 {
         match *type_ {
-            Normal(id) => self.types[id].size(),
-            StaticArray(ref inner, size) => self.size_of(&**inner) * size,
+            Normal(id) => align(self.types[id].size()),
+            StaticArray(ref inner, size) => align(self.size_of(&**inner) * size),
             Pointer(..) => 4,
             Bottom => fail!("ICE: Attempted to determine size of bottom type"),
             Any => fail!("ICE: Attempted to determine size of any type"),
@@ -146,6 +148,17 @@ impl TypeTable {
         let index = self.types.len();
         self.type_map.insert(ast_type, index);
         self.types.push(resolved_type);
+    }
+}
+
+// Aligns types to words
+fn align(size: u16) -> u16 {
+    let padding = size % 4;
+    if padding != 0 {
+        size + (4 - padding)
+    }
+    else {
+        size
     }
 }
 
@@ -246,9 +259,11 @@ pub fn typegen(program: &ast::Program) -> TypeTable {
     };
 
     // Insert primitive types into the type map
-    data.type_table.add_mapping(ast::Primitive(ast::IntType), Int);
-    data.type_table.add_mapping(ast::Primitive(ast::BoolType), Bool);
     data.type_table.add_mapping(ast::Primitive(ast::UnitType), Unit);
+    data.type_table.add_mapping(ast::Primitive(ast::IntType), Int);
+    data.type_table.add_mapping(ast::Primitive(ast::CharType), Char);
+    data.type_table.add_mapping(ast::Primitive(ast::BoolType), Bool);
+
 
     let mut struct_list = vec![];
 

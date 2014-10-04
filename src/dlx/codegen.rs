@@ -10,9 +10,10 @@ use dlx::types::{Type, TypeTable};
 
 use error::{InputSpan, Logger};
 
-static INT_TYPE: Type = types::Normal(0);
-static BOOL_TYPE: Type = types::Normal(1);
-static UNIT_TYPE: Type = types::Normal(2);
+static UNIT_TYPE: Type = types::Normal(0);
+static INT_TYPE: Type = types::Normal(1);
+static CHAR_TYPE: Type = types::Normal(2);
+static BOOL_TYPE: Type = types::Normal(3);
 
 // Special register that is always 0
 static ZERO_REG: RegId = 0;
@@ -33,22 +34,13 @@ static ADDR_REG: RegId = 3;
 // Register use for copying values
 static COPY_REG: RegId = 4;
 
-static DATA_SEGMENT: &'static str =
-"
-; Start of compile time data segment
-        .seg    data
-";
-
-static CODE_SEGMENT: &'static str =
-"
-; Start of code segment
-        .seg    code
-";
+static DATA_SEGMENT: &'static str = "        .seg    data";
+static CODE_SEGMENT: &'static str = "        .seg    code";
 
 static PROGRAM_START: &'static str =
 "
 ; Allocate some dynamic memory for the program to use
-        .seg    dynamic_mem
+        .seg    data
 stack   .space  1000
 heap    .space  1000
 
@@ -95,14 +87,16 @@ enum Location {
 struct Variable {
     ast: ast::LetStatement,
     rtype: Type,
+    is_const: bool,
     location: Location,
 }
 
 impl Variable {
-    fn new(ast: ast::LetStatement, rtype: Type, location: Location) -> Variable {
+    fn new(ast: ast::LetStatement, rtype: Type, location: Location, is_const: bool) -> Variable {
         Variable {
             ast: ast,
             rtype: rtype,
+            is_const: is_const,
             location: location,
         }
     }
@@ -207,6 +201,7 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start
         label_count: 0,
         logger: logger,
         add_to_address: false,
+        const_mem: false,
     };
 
     // Parse globals
@@ -226,7 +221,8 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start
                 let label = format!("{}{}", name, data.next_unique_id());
                 global.add_ident(name, id, let_item.span.clone());
                 let rtype = data.resolve_type(&global, &let_item.var_type);
-                global.vars.push(Variable::new(let_item, rtype, Label(label)));
+                let is_const = let_item.is_const;
+                global.vars.push(Variable::new(let_item, rtype, Label(label), is_const));
             },
 
             // Handled by type gen
@@ -240,9 +236,11 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start
         data.compile_global_var(&global, i);
     }
 
-    data.instructions.push(asm::RawAsm(CODE_SEGMENT.to_string()));
     if add_prog_start {
         data.instructions.push(asm::RawAsm(PROGRAM_START.to_string()));
+    }
+    else {
+        data.instructions.push(asm::RawAsm(CODE_SEGMENT.to_string()));
     }
     // Compile global functions
     for i in range(0u, global.functions.len()) {
@@ -258,6 +256,7 @@ struct CodeData<'a> {
     label_count: uint,
     logger: &'a Logger<'a>,
     add_to_address: bool,
+    const_mem: bool,
 }
 
 impl<'a> CodeData<'a> {
@@ -278,6 +277,13 @@ impl<'a> CodeData<'a> {
 
     /// Compile a global variable
     fn compile_global_var(&mut self, scope: &Scope, var_id: uint) {
+        let is_const = scope.vars[var_id].is_const;
+        if is_const != self.const_mem {
+            if is_const { self.instructions.push(asm::RawAsm(CODE_SEGMENT.to_string())); }
+            else { self.instructions.push(asm::RawAsm(DATA_SEGMENT.to_string())); }
+            self.const_mem = is_const;
+        }
+
         // Add the variable's label
         let label = match scope.vars[var_id].location {
             Label(ref s) => s.clone(),
@@ -291,9 +297,8 @@ impl<'a> CodeData<'a> {
             // Initialized variables
             Some(ref expr) => {
                 match *expr.rhs.expr {
-                    // For now global vars can only be words
-                    ast::LitNumExpr(n) => {
-                        self.instructions.push(asm::AllocateWords(vec![n as i32]));
+                    ast::LitNumExpr(value) => {
+                        self.instructions.push(asm::AllocateWords(vec![value as i32]));
                     },
 
                     ast::StaticArrayExpr(ref inner) => {
@@ -312,6 +317,13 @@ impl<'a> CodeData<'a> {
                             ref invalid => {
                                 fail!("Unable to statically resolve expression: `{}`", invalid)
                             },
+                        }
+                    },
+
+                    ast::LitStringExpr(ref value) => {
+                        self.instructions.push(asm::AllocateAscii(value.clone()));
+                        if value.len() % 4 != 0 {
+                            self.instructions.push(asm::Align(2));
                         }
                     },
 
@@ -353,11 +365,12 @@ impl<'a> CodeData<'a> {
                 name: name.clone(),
                 var_type: var_type.clone(),
                 assignment: None,
+                is_const: false,
                 span: span.clone(),
             };
             let rtype = self.resolve_type(scope, &var_ast.var_type);
             next_param_addr -= self.size_of(&rtype);
-            let var = Variable::new(var_ast, rtype, Offset(next_param_addr as i16));
+            let var = Variable::new(var_ast, rtype, Offset(next_param_addr as i16), false);
 
             let id = VarIdentId(local.vars.len());
             local.add_ident(name.clone(), id, span.clone());
@@ -481,6 +494,9 @@ impl<'a> CodeData<'a> {
                 self.load_var(&var.rtype, &var.location);
             },
             ast::StaticArrayExpr(ref inner) => {
+                unimplemented!();
+            },
+            ast::LitStringExpr(ref inner) => {
                 unimplemented!();
             },
             ast::StructInitExpr(ref inner) => {
@@ -639,10 +655,11 @@ impl<'a> CodeData<'a> {
             name: loop_var_name.clone(),
             var_type: ast::Primitive(ast::IntType),
             assignment: None,
+            is_const: false,
             span: for_statement.span.clone(),
         };
         let loop_var_type = self.resolve_type(scope, &ast::Primitive(ast::IntType));
-        let loop_var = Variable::new(loop_var_ast, loop_var_type, Offset(scope.next_offset));
+        let loop_var = Variable::new(loop_var_ast, loop_var_type, Offset(scope.next_offset), false);
         scope.next_offset += var_size as i16 * 2;
 
         let id = VarIdentId(scope.vars.len());
@@ -752,7 +769,8 @@ impl<'a> CodeData<'a> {
         scope.add_ident(let_statement.name.clone(), id, let_statement.span);
 
         let rtype = self.resolve_type(scope, &let_statement.var_type);
-        let var = Variable::new(let_statement.clone(), rtype.clone(), Offset(scope.next_offset));
+        let var = Variable::new(let_statement.clone(), rtype.clone(), Offset(scope.next_offset),
+            let_statement.is_const);
         scope.next_offset += self.size_of(&rtype) as i16;
         scope.vars.push(var);
 
