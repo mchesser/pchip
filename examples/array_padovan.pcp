@@ -72,14 +72,22 @@ fn padSum(low: int, high: int, step: int) -> int {
     result
 }
 
-let result_arr: [int, ..5];
+let result_arr: [int, ..10];
+let test_str: [char, ..11];
 
 fn main() {   
-    #result_arr = heap_alloc(20) as *int;
+    result_arr = [
+        padSum(0, 5, 1),
+        padSum(2, 11, 2),
+        padSum(5, 2, 1),
+        padSum(2, 10, -1),
+        add(result_arr[0], result_arr[1]),
+        6,
+        7,
+        8,
+        9,
+        10
+    ];
     
-    result_arr[0] = padSum(0, 5, 1);
-    result_arr[1] = padSum(2, 11, 2);
-    result_arr[2] = padSum(5, 2, 1);
-    result_arr[3] = padSum(2, 10, -1);
-    result_arr[4] = add(result_arr[0], result_arr[1]);
+    test_str = "hello world";
 }

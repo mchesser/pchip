@@ -135,9 +135,13 @@ impl TypeTable {
     }
 
     pub fn size_of(&self, type_: &Type) -> u16 {
+        align(self.unaligned_size_of(type_))
+    }
+
+    pub fn unaligned_size_of(&self, type_: &Type) -> u16 {
         match *type_ {
-            Normal(id) => align(self.types[id].size()),
-            StaticArray(ref inner, size) => align(self.size_of(&**inner) * size),
+            Normal(id) => self.types[id].size(),
+            StaticArray(ref inner, size) => self.unaligned_size_of(&**inner) * size,
             Pointer(..) => 4,
             Bottom => fail!("ICE: Attempted to determine size of bottom type"),
             Any => fail!("ICE: Attempted to determine size of any type"),

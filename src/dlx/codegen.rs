@@ -478,11 +478,47 @@ impl<'a> CodeData<'a> {
                 let var = scope.get_ident(name, span).unwrap_var();
                 self.load_var(&var.rtype, &var.location);
             },
-            ast::StaticArrayExpr(ref inner) => {
-                unimplemented!();
-            },
+            ast::StaticArrayExpr(ref inner) => self.compile_static_array(scope, inner),
             ast::LitStringExpr(ref inner) => {
-                unimplemented!();
+                // Convert the string into a byte array
+                // FIXME: this should happen in the lexer/parser
+                let mut bytes = vec![];
+                let mut str_slice = inner.as_slice();
+                loop {
+                    let (extracted_char, rest) = str_slice.slice_shift_char();
+                    let c = match extracted_char {
+                        // Escape chars
+                        Some('\\') => {
+                            let (escaped_char, rest) = rest.slice_shift_char();
+                            str_slice = rest;
+                            match escaped_char {
+                                Some('n') => '\n',
+                                Some('0') => '\0',
+                                Some(invalid) => fail!("Invalid escape char: {}", invalid),
+                                None => fail!("ICE, end of string was escaped"),
+                            }
+                        },
+                        // Normal chars
+                        Some(other) => {
+                            str_slice = rest;
+                            other
+                        },
+                        None => break,
+                    };
+
+                    let expression = ast::Expression {
+                        expr: box ast::LitCharExpr(c),
+                        rtype: ast::Primitive(ast::CharType),
+                        span: span.clone(),
+                    };
+                    bytes.push(expression);
+                }
+
+                let static_array = ast::StaticArray {
+                    elements: bytes,
+                    span: span.clone(),
+                };
+                self.compile_static_array(scope, &static_array);
             },
             ast::StructInitExpr(ref inner) => {
                 unimplemented!();
@@ -797,12 +833,55 @@ impl<'a> CodeData<'a> {
 
         // We now have the result of the rhs in TEMP_REG and the address we want to assign to in
         // RESULT_REG. The type of the variable is required so that we know how to copy the data.
-        self.copy_var(target_type, TEMP_REG, RESULT_REG);
+        self.copy_var(&target_type, TEMP_REG, RESULT_REG);
     }
 
-    fn copy_var(&mut self, var_type: types::Type, from: asm::RegId, to: asm::RegId) {
-        match var_type {
-            // These types can be stored in a single word, so we can just copy them directly
+    fn compile_static_array(&mut self, scope: &mut Scope, array: &ast::StaticArray) {
+        // Special case for a zero sized array
+        if array.elements.len() == 0 {
+            self.instructions.push(asm::AddUnsigned(RESULT_REG, STACK_POINTER, ZERO_REG));
+            return;
+        }
+
+        // Compile the first element and add it to the start of the array.
+        // NOTE: this needs to be done first so that we can properly resolve the type of the array
+        // elements
+        self.compile_expression(scope, &array.elements[0]);
+        let element_type = self.resolve_type(scope, &array.elements[0].rtype);
+        // Using the unaligned size for arrays allows us to efficiently store strings as byte arrays
+        let element_size = self.unaligned_size_of(&element_type);
+        self.copy_var(&element_type, RESULT_REG, STACK_POINTER);
+
+        let mut offset = element_size as i16;
+        self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER, element_size));
+
+        for element in array.elements.iter().skip(1) {
+            self.compile_expression(scope, element);
+            self.copy_var(&element_type, RESULT_REG, STACK_POINTER);
+            self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER,
+                element_size));
+            offset += element_size as i16;
+        }
+
+        // Ensure that the stack pointer is correctly aligned
+        if offset % 4 != 0 {
+            let pad = 4 - (offset % 4);
+            offset = offset + pad;
+            self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER,
+                pad as u16));
+        }
+
+        // Return a pointer to the first element
+        self.instructions.push(asm::AddSignedValue(RESULT_REG, STACK_POINTER, -offset));
+    }
+
+    fn copy_var(&mut self, var_type: &types::Type, from: asm::RegId, to: asm::RegId) {
+        match *var_type {
+            CHAR_TYPE => {
+                self.instructions.push(asm::Store8(asm::Const(0), to, from));
+            },
+
+            // These types are a single word in size
             INT_TYPE | BOOL_TYPE | types::Pointer(..) => {
                 self.instructions.push(asm::Store32(asm::Const(0), to, from));
             },
@@ -810,12 +889,12 @@ impl<'a> CodeData<'a> {
             // Other types cannot be stored in a single word, and since there is no easy way to do
             // a memcopy in DLX we must manually copy all bytes. In this case, the from register
             // will store the location of the first byte
-            other => {
+            ref other => {
                 // The copy register should never be either of the input registers
                 assert!(from != COPY_REG && to != COPY_REG);
 
                 // NOTE: types *must* be word aligned
-                let num_words = (self.size_of(&other) / 4) as i16;
+                let num_words = (self.size_of(other) / 4) as i16;
                 // Perform a load and store for each of the words
                 for i in range(0, num_words) {
                     self.instructions.push(asm::Load32(COPY_REG, asm::Const(i * 4), from));
@@ -920,6 +999,10 @@ impl<'a> CodeData<'a> {
 
     fn size_of(&self, type_: &Type) -> u16 {
         self.type_table.size_of(type_)
+    }
+
+    fn unaligned_size_of(&self, type_: &Type) -> u16 {
+        self.type_table.unaligned_size_of(type_)
     }
 
     fn resolve_type(&self, scope: &Scope, ast_type: &ast::Type) -> Type {
