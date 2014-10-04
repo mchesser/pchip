@@ -8,10 +8,10 @@ use error::InputSpan;
 type TypeId = uint;
 
 #[deriving(Clone)]
-struct CompositeType {
-    name: String,
-    fields: HashMap<String, (u16, Type)>,
-    size: u16,
+pub struct CompositeType {
+    pub name: String,
+    pub fields: HashMap<String, (u16, Type)>,
+    pub size: u16,
 }
 
 impl CompositeType {
@@ -41,7 +41,7 @@ impl fmt::Show for CompositeType {
 }
 
 #[deriving(Show, Clone)]
-enum BaseType {
+pub enum BaseType {
     Bool,
     Int,
     Unit,
@@ -107,11 +107,28 @@ impl TypeTable {
                     }
                 }
             },
+            ast::FieldRefType(ref inner, ref field_name) => {
+                let inner_type = self.resolve_type(scope, &**inner);
+                match *self.base_type(&inner_type) {
+                    Composite(ref target_type) => {
+                        (target_type.fields[field_name.clone()].1).clone()
+                    },
+                    ref invalid => fail!("type `{}` has no field `{}`", invalid, field_name),
+                }
+            },
             ast::Primitive(ast::BottomType) => Bottom,
             ast::Primitive(ast::AnyType) => Any,
 
             // Otherwise this is a normal variable
             _ => Normal(self.type_map[ast_type.clone()]),
+        }
+    }
+
+    pub fn base_type(&self, type_: &Type) -> &BaseType {
+        match *type_ {
+            Normal(id) => &self.types[id],
+            Pointer(ref inner) => self.base_type(&**inner),
+            ref invalid => fail!("There is no base type associated with {}", invalid),
         }
     }
 

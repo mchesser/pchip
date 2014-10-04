@@ -30,6 +30,8 @@ static RESULT_REG: RegId = 1;
 static TEMP_REG: RegId = 2;
 // Register used for storing addresses
 static ADDR_REG: RegId = 3;
+// Register use for copying values
+static COPY_REG: RegId = 4;
 
 static DATA_SEGMENT: &'static str =
 "
@@ -446,10 +448,12 @@ impl<'a> CodeData<'a> {
                     }
                 }
             },
-            ast::FieldRefExpr(ref inner) => unimplemented!(),
+            ast::FieldRefExpr(ref inner) => {
+                self.compile_field_ref(scope, inner);
+                self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), RESULT_REG));
+            },
             ast::ArrayIndexExpr(ref inner) => {
                 self.compile_array_index(scope, inner);
-                // Then dereference it
                 self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), RESULT_REG));
             },
             ast::IfExpr(ref inner) => self.compile_if(scope, inner),
@@ -474,7 +478,7 @@ impl<'a> CodeData<'a> {
             ast::AssignExpr(ref inner) => self.compile_assign(scope, inner),
             ast::VariableExpr(ref name) => {
                 let var = scope.get_ident(name, span).unwrap_var();
-                self.load_var(var);
+                self.load_var(&var.rtype, &var.location);
             },
             ast::StaticArrayExpr(ref inner) => {
                 unimplemented!();
@@ -490,6 +494,35 @@ impl<'a> CodeData<'a> {
             }
             ast::EmptyExpr => {},
         }
+    }
+
+    fn compile_field_ref(&mut self, scope: &mut Scope, field_ref: &ast::FieldRef) {
+        self.compile_expression(scope, &field_ref.target);
+
+        let target_type = self.resolve_type(scope, &field_ref.target.rtype);
+        let target_base_type = self.type_table.base_type(&target_type);
+
+        // Find the offset of the field
+        let field_offset = match *target_base_type {
+            types::Composite(ref inner) => {
+                match inner.fields.find(&field_ref.field) {
+                    Some(&(offset, _)) => offset,
+                    None => {
+                        self.logger.report_error(format!("type `{}` has no field {}", target_type,
+                            field_ref.field), field_ref.span);
+                        self.fatal_error();
+                    }
+                }
+            },
+            ref invalid => {
+                self.logger.report_error(format!("type `{}` has no field {}", invalid,
+                    field_ref.field), field_ref.span);
+                self.fatal_error();
+            }
+        };
+
+        // Add the offset to the target address
+        self.instructions.push(asm::AddUnsignedValue(RESULT_REG, RESULT_REG, field_offset));
     }
 
     fn compile_array_index(&mut self, scope: &mut Scope, index_expr: &ast::ArrayIndex) {
@@ -747,7 +780,7 @@ impl<'a> CodeData<'a> {
             // Assignment to an ordinary variable, we want to assign to the address of this variable
             ast::VariableExpr(ref name) => {
                 let var = scope.get_ident(name, target_span).unwrap_var();
-                self.address_of(var);
+                self.address_of(&var.location);
             },
 
             // Assignment to a dereference of a pointer
@@ -756,6 +789,9 @@ impl<'a> CodeData<'a> {
 
             // Assignment to an index of an array
             ast::ArrayIndexExpr(ref inner) => self.compile_array_index(scope, inner),
+
+            // Assignment to a field of a struct
+            ast::FieldRefExpr(ref inner) => self.compile_field_ref(scope, inner),
 
             // Assignment to anything else is invalid
             _ => {
@@ -778,23 +814,28 @@ impl<'a> CodeData<'a> {
             },
 
             // Other types cannot be stored in a single word, and since there is no easy way to do
-            // a memcopy in DLX we must manually copy all bytes
+            // a memcopy in DLX we must manually copy all bytes. In this case, the from register
+            // will store the location of the first byte
             other => {
+                // The copy register should never be either of the input registers
+                assert!(from != COPY_REG && to != COPY_REG);
+
                 // NOTE: types *must* be word aligned
                 let num_words = (self.size_of(&other) / 4) as i16;
+                // Perform a load and store for each of the words
                 for i in range(0, num_words) {
-                    self.instructions.push(asm::Store32(asm::Const(i * 4), to, from));
-                    self.instructions.push(asm::AddUnsignedValue(from, from, 4));
+                    self.instructions.push(asm::Load32(COPY_REG, asm::Const(i * 4), from));
+                    self.instructions.push(asm::Store32(asm::Const(i * 4), to, COPY_REG));
                 }
             }
         }
     }
 
-    fn load_var(&mut self, var: &Variable) {
-        match var.rtype {
+    fn load_var(&mut self, var_type: &types::Type, location: &Location) {
+        match *var_type {
             // These types can be stored in registers so we load their value into the result reg
             INT_TYPE | BOOL_TYPE | types::Pointer(..) => {
-                match var.location {
+                match *location {
                     Label(ref label) => {
                         self.instructions.push(asm::Load32(RESULT_REG, asm::Unknown(label.clone()),
                             ZERO_REG));
@@ -807,12 +848,12 @@ impl<'a> CodeData<'a> {
             },
             // These types cannot be stored in registers so we load their address into the result
             // reg
-            _ => self.address_of(var),
+            _ => self.address_of(location),
         }
     }
 
-    fn address_of(&mut self, var: &Variable) {
-        match var.location {
+    fn address_of(&mut self, var_location: &Location) {
+        match *var_location {
             Label(ref label) => {
                 let asm = format!("        addui   r{},r{},{}", RESULT_REG, ZERO_REG, label);
                 self.instructions.push(asm::RawAsm(asm));
