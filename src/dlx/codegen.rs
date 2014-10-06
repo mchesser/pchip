@@ -35,14 +35,15 @@ static ADDR_REG: RegId = 3;
 static COPY_REG: RegId = 4;
 
 static DATA_SEGMENT: &'static str = "        .seg    data";
+static CONST_DATA_SEGMENT: &'static str = "        .seg    constdata";
 static CODE_SEGMENT: &'static str = "        .seg    code";
 
 static PROGRAM_START: &'static str =
 "
 ; Allocate some dynamic memory for the program to use
         .seg    data
-stack   .space  1000
-heap    .space  1000
+stack   .space  800
+heap    .space  800
 
 ; Manually start the program
         .seg    code
@@ -280,7 +281,7 @@ impl<'a> CodeData<'a> {
     fn compile_global_var(&mut self, scope: &Scope, var_id: uint) {
         let is_const = scope.vars[var_id].is_const;
         if is_const != self.const_mem {
-            if is_const { self.instructions.push(asm::RawAsm(CODE_SEGMENT.to_string())); }
+            if is_const { self.instructions.push(asm::RawAsm(CONST_DATA_SEGMENT.to_string())); }
             else { self.instructions.push(asm::RawAsm(DATA_SEGMENT.to_string())); }
             self.const_mem = is_const;
         }
@@ -774,16 +775,17 @@ impl<'a> CodeData<'a> {
         for arg in call.args.iter() {
             let arg_type = self.resolve_type(scope, &arg.rtype);
             let arg_size = self.size_of(&arg_type);
-            call_args.push(arg_type);
 
             // Compile the expression
             self.compile_expression(scope, arg);
             // Write the result of the expression to the stack
-            self.instructions.push(asm::Store32(asm::Const(0), STACK_POINTER, RESULT_REG));
+            self.copy_var(&arg_type, RESULT_REG, STACK_POINTER);
             // Increment the stack
             self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER,
                 arg_size as u16));
             stack_offset += arg_size as i16;
+
+            call_args.push(arg_type);
         }
 
         // Get the function corresponding to the call
@@ -983,8 +985,11 @@ impl<'a> CodeData<'a> {
             CHAR_TYPE => {
                 match *location {
                     Label(ref label) => {
-                        self.instructions.push(asm::Load8(RESULT_REG, asm::Unknown(label.clone()),
-                            ZERO_REG));
+                        // HACK to allow us to access some extra memory
+                        self.address_of(location);
+                        self.instructions.push(asm::Load8(RESULT_REG, asm::Const(0), RESULT_REG));
+                        //self.instructions.push(asm::Load8(RESULT_REG, asm::Unknown(label.clone()),
+                        //    ZERO_REG));
                     },
                     Offset(amount) => {
                         self.instructions.push(asm::Load8(RESULT_REG, asm::Const(amount),
@@ -1000,8 +1005,11 @@ impl<'a> CodeData<'a> {
             INT_TYPE | BOOL_TYPE | types::Pointer(..) => {
                 match *location {
                     Label(ref label) => {
-                        self.instructions.push(asm::Load32(RESULT_REG, asm::Unknown(label.clone()),
-                            ZERO_REG));
+                        // HACK to allow us to access some extra memory
+                        self.address_of(location);
+                        self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), RESULT_REG));
+                        //self.instructions.push(asm::Load32(RESULT_REG, asm::Unknown(label.clone()),
+                        //    ZERO_REG));
                     },
                     Offset(amount) => {
                         self.instructions.push(asm::Load32(RESULT_REG, asm::Const(amount),
