@@ -19,6 +19,7 @@ impl fmt::Show for Value {
     }
 }
 
+#[allow(dead_code)]
 pub enum Instruction {
     // Memory transfer instructions
     Load8(RegId, Value, RegId),
@@ -191,7 +192,7 @@ impl Instruction {
                 for &value in values.iter() {
                     base.push_str((format!("{},", value)).as_slice());
                 }
-                base.pop_char();
+                base.pop();
                 base
             },
             AllocateHalfWords(values) => {
@@ -199,7 +200,7 @@ impl Instruction {
                 for &value in values.iter() {
                     base.push_str((format!("{},", value)).as_slice());
                 }
-                base.pop_char();
+                base.pop();
                 base
             },
             AllocateWords(values) => {
@@ -207,7 +208,7 @@ impl Instruction {
                 for &value in values.iter() {
                     base.push_str((format!("{},", value)).as_slice());
                 }
-                base.pop_char();
+                base.pop();
                 base
             },
             AllocateSpace(amount) => format!(".space  {}", amount),

@@ -897,7 +897,7 @@ impl<'a> Parser<'a> {
                     code.push_str(string.as_slice());
                 },
                 lexer::RightBrace => {
-                    code.pop_char();
+                    code.pop();
                     break;
                 },
                 invalid => {
@@ -911,7 +911,7 @@ impl<'a> Parser<'a> {
             match self.next_token() {
                 lexer::RightBrace => break,
                 lexer::Comma => {
-                    code.push_char('\n');
+                    code.push('\n');
                     continue;
                 },
                 invalid => {

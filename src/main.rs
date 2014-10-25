@@ -41,7 +41,7 @@ fn main() {
         match inst {
             dlx::asm::Label(label) => {
                 if space != 0 {
-                    program_string.push_char('\n');
+                    program_string.push('\n');
                     space = 0;
                 }
                 program_string.push_str(label.as_slice());
@@ -49,17 +49,17 @@ fn main() {
             },
             dlx::asm::RawAsm(data) => {
                 if space != 0 {
-                    program_string.push_char('\n');
+                    program_string.push('\n');
                     space = 0;
                 }
                 program_string.push_str(data.as_slice());
-                program_string.push_char('\n');
+                program_string.push('\n');
             },
             other => {
                 let data = other.into_string();
                 program_string.grow(8 - min(7, space), ' ');
                 program_string.push_str(data.as_slice());
-                program_string.push_char('\n');
+                program_string.push('\n');
                 space = 0;
             }
         }

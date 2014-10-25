@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::hashmap::{HashMap, Occupied, Vacant};
 
 use ast;
 
@@ -10,35 +10,35 @@ use dlx::types::{Type, TypeTable};
 
 use error::{InputSpan, Logger};
 
-static UNIT_TYPE: Type = types::Normal(0);
-static INT_TYPE: Type = types::Normal(1);
-static CHAR_TYPE: Type = types::Normal(2);
-static BOOL_TYPE: Type = types::Normal(3);
+const UNIT_TYPE: Type = types::Normal(0);
+const INT_TYPE: Type = types::Normal(1);
+const CHAR_TYPE: Type = types::Normal(2);
+const BOOL_TYPE: Type = types::Normal(3);
 
 // Special register that is always 0
-static ZERO_REG: RegId = 0;
+const ZERO_REG: RegId = 0;
 // Frame pointer register
-static FRAME_POINTER: RegId = 30;
+const FRAME_POINTER: RegId = 30;
 // Stack pointer register
-static STACK_POINTER: RegId = 14;
+const STACK_POINTER: RegId = 14;
 // Heap pointer register
-static HEAP_POINTER: RegId = 15;
+const HEAP_POINTER: RegId = 15;
 // Return address register (set by jal)
-static RETURN_REG: RegId = 31;
+const RETURN_REG: RegId = 31;
 // Register used for storing the results of computations
-static RESULT_REG: RegId = 1;
+const RESULT_REG: RegId = 1;
 // Register used for temporary values
-static TEMP_REG: RegId = 2;
+const TEMP_REG: RegId = 2;
 // Register used for storing addresses
-static ADDR_REG: RegId = 3;
+const ADDR_REG: RegId = 3;
 // Register use for copying values
-static COPY_REG: RegId = 4;
+const COPY_REG: RegId = 4;
 
-static DATA_SEGMENT: &'static str = "        .seg    data";
-static CONST_DATA_SEGMENT: &'static str = "        .seg    constdata";
-static CODE_SEGMENT: &'static str = "        .seg    code";
+const DATA_SEGMENT: &'static str = "        .seg    data";
+const CONST_DATA_SEGMENT: &'static str = "        .seg    constdata";
+const CODE_SEGMENT: &'static str = "        .seg    code";
 
-static PROGRAM_START: &'static str =
+const PROGRAM_START: &'static str =
 "
 ; Allocate some dynamic memory for the program to use
         .seg    data
@@ -164,11 +164,10 @@ impl<'a> Scope<'a> {
 
     /// Add an identifier to the scope
     fn add_ident(&mut self, ident_name: String, ident: IdentId, _span: InputSpan) {
-        let stored_ident = self.ident_table.find_or_insert(ident_name, ident);
-        // If the stored identifier is different to the one we are attempting to add, then this
-        // identifier shadows an existing one. Variable shadowing is currently not supported.
-        if *stored_ident != ident {
-            fail!("IDENT_SHADOW_ERROR, TODO: improve error message")
+        match self.ident_table.entry(ident_name) {
+            Vacant(entry) => { entry.set(ident); },
+	    // This identifier shadows an existing one. Variable shadowing is not supported.
+	    Occupied(..) => fail!("IDENT_SHADOW_ERROR, TODO: improve error message"),
         }
     }
 
@@ -984,7 +983,7 @@ impl<'a> CodeData<'a> {
             // These types are byte sized
             CHAR_TYPE => {
                 match *location {
-                    Label(ref label) => {
+                    Label(ref _label) => {
                         // HACK to allow us to access some extra memory
                         self.address_of(location);
                         self.instructions.push(asm::Load8(RESULT_REG, asm::Const(0), RESULT_REG));
@@ -1004,7 +1003,7 @@ impl<'a> CodeData<'a> {
             // These types are word sized
             INT_TYPE | BOOL_TYPE | types::Pointer(..) => {
                 match *location {
-                    Label(ref label) => {
+                    Label(ref _label) => {
                         // HACK to allow us to access some extra memory
                         self.address_of(location);
                         self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), RESULT_REG));

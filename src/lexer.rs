@@ -179,7 +179,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                 }
             },
 
-            '0'..'9' => {
+            '0'...'9' => {
                 token_len = scan_token(self.remaining);
                 let number_str = self.remaining.slice_to(token_len);
                 match from_str(number_str) {
@@ -257,7 +257,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
 
 /// Scans till the end of the token returning the index of the end of the token
 fn scan_token(string: &str) -> uint {
-    static TOKEN_BOUNDS: &'static [char] = &[
+    const TOKEN_BOUNDS: &'static [char] = &[
         ' ', '\t', '\n', '\r', '#', ':', ';', ',', '(', ')', '{', '}', '[', ']', '.', '*', '&', '=',
         '+', '-', '"', '\'',
     ];
