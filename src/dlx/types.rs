@@ -78,7 +78,7 @@ impl Type {
         match *self {
             StaticArray(ref inner, _) => &**inner,
             Pointer(ref inner) => &**inner,
-            ref invalid => fail!("ICE: Attempted to dereference `{}`", invalid),
+            ref invalid => panic!("ICE: Attempted to dereference `{}`", invalid),
         }
     }
 }
@@ -105,7 +105,7 @@ impl TypeTable {
                         *inner.clone()
                     },
                     invalid => {
-                        fail!("type `{}` cannot be dereferenced", invalid);
+                        panic!("type `{}` cannot be dereferenced", invalid);
                     }
                 }
             },
@@ -115,7 +115,7 @@ impl TypeTable {
                     Composite(ref target_type) => {
                         (target_type.fields[field_name.clone()].1).clone()
                     },
-                    ref invalid => fail!("type `{}` has no field `{}`", invalid, field_name),
+                    ref invalid => panic!("type `{}` has no field `{}`", invalid, field_name),
                 }
             },
             ast::Primitive(ast::BottomType) => Bottom,
@@ -130,7 +130,7 @@ impl TypeTable {
         match *type_ {
             Normal(id) => &self.types[id],
             Pointer(ref inner) => self.base_type(&**inner),
-            ref invalid => fail!("There is no base type associated with {}", invalid),
+            ref invalid => panic!("There is no base type associated with {}", invalid),
         }
     }
 
@@ -143,8 +143,8 @@ impl TypeTable {
             Normal(id) => self.types[id].size(),
             StaticArray(ref inner, size) => self.unaligned_size_of(&**inner) * size,
             Pointer(..) => 4,
-            Bottom => fail!("ICE: Attempted to determine size of bottom type"),
-            Any => fail!("ICE: Attempted to determine size of any type"),
+            Bottom => panic!("ICE: Attempted to determine size of bottom type"),
+            Any => panic!("ICE: Attempted to determine size of any type"),
         }
     }
 
@@ -187,7 +187,7 @@ impl<'a> TypeGenData<'a> {
                 None => continue,
             };
             let resolved = Composite(box self.gen_struct_type(&struct_decl));
-            *self.type_table.types.get_mut(id) = resolved;
+            self.type_table.types[id] = resolved;
         }
 
         self.type_table
@@ -227,7 +227,7 @@ impl<'a> TypeGenData<'a> {
             },
         };
         let resolved = Composite(box self.gen_struct_type(&struct_decl));
-        *self.type_table.types.get_mut(id) = resolved;
+        self.type_table.types[id] = resolved;
         Normal(id)
     }
 
@@ -252,7 +252,7 @@ impl<'a> TypeGenData<'a> {
             },
 
             // No other types are valid here
-            ref invalid => fail!("unexpected type: {}", invalid),
+            ref invalid => panic!("unexpected type: {}", invalid),
         }
     }
 }

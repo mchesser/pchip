@@ -184,7 +184,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                 let number_str = self.remaining.slice_to(token_len);
                 match from_str(number_str) {
                     Some(n) => LitNum(n),
-                    None => fail!("Invalid number"),
+                    None => panic!("Invalid number"),
                 }
             },
 
@@ -193,7 +193,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                 token_len = match self.remaining.find('"') {
                     Some(offset) => offset,
                     None => {
-                        fail!("Unclosed \" ");
+                        panic!("Unclosed \" ");
                     },
                 };
                 let result = LitString(self.remaining.slice_to(token_len).into_string());
@@ -203,13 +203,13 @@ impl<'a> Iterator<Token> for Lexer<'a> {
 
             '\'' => {
                 if len < 3 {
-                    fail!("Invalid char literal");
+                    panic!("Invalid char literal");
                 }
                 self.bump();
                 let result = LitChar(self.remaining.char_at(0));
                 self.bump();
                 if self.remaining.char_at(0) != '\'' {
-                    fail!("Unclosed '");
+                    panic!("Unclosed '");
                 }
                 result
             },

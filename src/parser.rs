@@ -51,7 +51,7 @@ impl<'a> Parser<'a> {
     }
 
     fn fatal_error(&self) -> ! {
-        fail!("");
+        panic!("");
     }
 
     fn current_pos(&self) -> InputPos {
@@ -458,7 +458,7 @@ impl<'a> Parser<'a> {
                         self.bump();
                         self.handle_num(-value, span_start)
                     },
-                    _ => fail!("ICE: Cannot negate expression")
+                    _ => panic!("ICE: Cannot negate expression")
                 }
             },
             lexer::Let => {

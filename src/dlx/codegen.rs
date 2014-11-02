@@ -125,7 +125,7 @@ impl<'a> Ident<'a> {
 
     fn unwrap_var(self) -> &'a Variable {
         match self {
-            FnIdent(..) => fail!("ICE attempted to unwrap function when attempting to get var"),
+            FnIdent(..) => panic!("ICE attempted to unwrap function when attempting to get var"),
             VarIdent(var) => var,
         }
     }
@@ -167,7 +167,7 @@ impl<'a> Scope<'a> {
         match self.ident_table.entry(ident_name) {
             Vacant(entry) => { entry.set(ident); },
 	    // This identifier shadows an existing one. Variable shadowing is not supported.
-	    Occupied(..) => fail!("IDENT_SHADOW_ERROR, TODO: improve error message"),
+	    Occupied(..) => panic!("IDENT_SHADOW_ERROR, TODO: improve error message"),
         }
     }
 
@@ -183,7 +183,7 @@ impl<'a> Scope<'a> {
                     None => {
                         // Reached the top level scope, but still could not find the identifier
                         // therefore it doesn't not exist at this location.
-                        fail!("IDENT_NOT_FOUND_ERROR, ({}), TODO: improve error message",
+                        panic!("IDENT_NOT_FOUND_ERROR, ({}), TODO: improve error message",
                             ident_name);
                     },
                 }
@@ -263,7 +263,7 @@ struct CodeData<'a> {
 impl<'a> CodeData<'a> {
     /// Codegen experienced a fatal error which must kill the program
     fn fatal_error(&self) -> ! {
-        fail!();
+        panic!();
     }
 
     /// Generating a unique label id
@@ -288,7 +288,7 @@ impl<'a> CodeData<'a> {
         // Add the variable's label
         let label = match scope.vars[var_id].location {
             Label(ref s) => s.clone(),
-            ref other => fail!("ICE: Location of global var is not a label, was {}", other),
+            ref other => panic!("ICE: Location of global var is not a label, was {}", other),
         };
         self.instructions.push(asm::Label(label));
 
@@ -315,13 +315,13 @@ impl<'a> CodeData<'a> {
                                 for element in inner.elements.iter() {
                                     match *element.expr {
                                         ast::LitNumExpr(n) => unwrapped.push(n as i32),
-                                        ref invalid => fail!("Array has not literal value"),
+                                        ref _invalid => panic!("Array has not literal value"),
                                     }
                                 }
                                 self.instructions.push(asm::AllocateWords(unwrapped));
                             },
                             ref invalid => {
-                                fail!("Unable to statically resolve expression: `{}`", invalid)
+                                panic!("Unable to statically resolve expression: `{}`", invalid)
                             },
                         }
                     },
@@ -399,7 +399,7 @@ impl<'a> CodeData<'a> {
 
         // Now set the amount of stack space to allocate
         let frame_size = local.next_offset;
-        *self.instructions.get_mut(reserve_stack_index) =
+        self.instructions[reserve_stack_index] =
             asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER, frame_size as u16);
 
         self.instructions.push(asm::Label(local.end_label.clone()));
@@ -504,8 +504,8 @@ impl<'a> CodeData<'a> {
                             match escaped_char {
                                 Some('n') => '\n',
                                 Some('0') => '\0',
-                                Some(invalid) => fail!("Invalid escape char: {}", invalid),
-                                None => fail!("ICE, end of string was escaped"),
+                                Some(invalid) => panic!("Invalid escape char: {}", invalid),
+                                None => panic!("ICE, end of string was escaped"),
                             }
                         },
                         // Normal chars
@@ -790,12 +790,12 @@ impl<'a> CodeData<'a> {
         // Get the function corresponding to the call
         let function = match scope.get_ident(&call.name, call.span.clone()) {
             FnIdent(ident) => ident,
-            VarIdent(..) => fail!("ERROR_EXPECTED_FUNCTION_FOUND_VAR, TODO: Improve this error"),
+            VarIdent(..) => panic!("ERROR_EXPECTED_FUNCTION_FOUND_VAR, TODO: Improve this error"),
         };
 
         // Check that the call args match the function args
         if call_args.len() != function.arg_types.len() {
-            fail!("INCORRECT NUMBER OF ARGUMENTS");
+            panic!("INCORRECT NUMBER OF ARGUMENTS");
         }
         for (call_arg, fn_arg) in call_args.iter().zip(function.arg_types.iter()) {
             self.check_type(call_arg, fn_arg, call.span.clone());
@@ -1044,7 +1044,7 @@ impl<'a> CodeData<'a> {
         // Check if it is a power of 2
         // TODO: Generate extra code for multiplications that are not a power of 2
         if !(num & (num - 1) == 0) {
-            fail!("ICE, error multiplying by a number that is not a power of 2");
+            panic!("ICE, error multiplying by a number that is not a power of 2");
         }
 
         let lshift_amount = (num as f32).log2() as u16;

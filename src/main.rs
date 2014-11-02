@@ -24,11 +24,11 @@ fn main() {
     }
     let mut file = match File::open(&Path::new(args[1].clone())) {
         Ok(f) => f,
-        Err(err) => fail!("Error opening file: {}", err)
+        Err(err) => panic!("Error opening file: {}", err)
     };
     let input = match file.read_to_string() {
         Ok(input) => input,
-        Err(err)  => fail!("Error reading file: {}", err)
+        Err(err)  => panic!("Error reading file: {}", err)
     };
 
     let logger = Logger::new(input.as_slice(), true);
