@@ -1,4 +1,5 @@
-use std::collections::hashmap::{HashMap, Occupied, Vacant};
+use std::collections::HashMap;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 
 use ast;
 
@@ -173,7 +174,7 @@ impl<'a> Scope<'a> {
 
     /// Get the identifier corresponding to an identifier name.
     pub fn get_ident(&self, ident_name: &String, span: InputSpan) -> Ident {
-        match self.ident_table.find(ident_name) {
+        match self.ident_table.get(ident_name) {
             Some(&FnIdentId(id)) => FnIdent(&self.functions[id]),
             Some(&VarIdentId(id)) => VarIdent(&self.vars[id]),
             None => {
@@ -563,7 +564,7 @@ impl<'a> CodeData<'a> {
     {
         match *target_type {
             types::Composite(ref inner) => {
-                match inner.fields.find(field) {
+                match inner.fields.get(field) {
                     Some(&(offset, ref type_)) => (offset, type_.clone()),
                     None => {
                         self.logger.report_error(format!("type `{}` has no field {}", target_type,

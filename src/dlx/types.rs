@@ -177,7 +177,7 @@ impl<'a> TypeGenData<'a> {
         // Iterate through the list of remaining types an resolve them. Some types depend on other
         // types, so we recursively resolve dependencies.
         for current_type in struct_list.iter() {
-            let (id, struct_decl) = match self.unresolved_map.find(current_type) {
+            let (id, struct_decl) = match self.unresolved_map.get(current_type) {
                 // This type is in still in unresolved list so we need to resolve it
                 Some(&(id, ref struct_decl)) => {
                     (id, struct_decl.clone())
@@ -217,7 +217,7 @@ impl<'a> TypeGenData<'a> {
     }
 
     fn full_resolve_type(&mut self, name: &String) -> Type {
-        let (id, struct_decl) = match self.unresolved_map.find(name) {
+        let (id, struct_decl) = match self.unresolved_map.get(name) {
             // This type is in still in unresolved list so we need to resolve it
             Some(&(id, ref struct_decl)) => (id, struct_decl.clone()),
 
