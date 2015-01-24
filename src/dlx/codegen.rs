@@ -11,6 +11,10 @@ use dlx::types::{Type, TypeTable};
 
 use error::{InputSpan, Logger};
 
+use self::IdentId::*;
+use self::Location::*;
+use self::Ident::*;
+
 const UNIT_TYPE: Type = types::Normal(0);
 const INT_TYPE: Type = types::Normal(1);
 const CHAR_TYPE: Type = types::Normal(2);
@@ -80,7 +84,7 @@ impl Function {
     }
 }
 
-#[deriving(Clone, Show)]
+#[derive(Clone, Show)]
 enum Location {
     Label(LabelId),
     Offset(i16),
@@ -105,10 +109,10 @@ impl Variable {
     }
 }
 
-#[deriving(PartialEq, Hash)]
+#[derive(PartialEq, Hash)]
 enum IdentId {
-    FnIdentId(uint),
-    VarIdentId(uint),
+    FnIdentId(usize),
+    VarIdentId(usize),
 }
 
 enum Ident<'a> {
@@ -166,9 +170,9 @@ impl<'a> Scope<'a> {
     /// Add an identifier to the scope
     fn add_ident(&mut self, ident_name: String, ident: IdentId, _span: InputSpan) {
         match self.ident_table.entry(ident_name) {
-            Vacant(entry) => { entry.set(ident); },
-	    // This identifier shadows an existing one. Variable shadowing is not supported.
-	    Occupied(..) => panic!("IDENT_SHADOW_ERROR, TODO: improve error message"),
+            Vacant(entry) => { entry.insert(ident); },
+            // This identifier shadows an existing one. Variable shadowing is not supported.
+            Occupied(..) => panic!("IDENT_SHADOW_ERROR, TODO: improve error message"),
         }
     }
 
@@ -196,7 +200,7 @@ impl<'a> Scope<'a> {
 pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start: bool)
     -> Vec<Instruction>
 {
-    let mut global = Scope::new("exit".into_string());
+    let mut global = Scope::new("exit".to_string());
     let mut data = CodeData {
         instructions: vec![],
         type_table: types::typegen(&program),
@@ -234,7 +238,7 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start
 
     data.instructions.push(asm::RawAsm(DATA_SEGMENT.to_string()));
     // Compile global variables
-    for i in range(0u, global.vars.len()) {
+    for i in (0..global.vars.len()) {
         data.compile_global_var(&global, i);
     }
 
@@ -245,7 +249,7 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start
         data.instructions.push(asm::RawAsm(CODE_SEGMENT.to_string()));
     }
     // Compile global functions
-    for i in range(0u, global.functions.len()) {
+    for i in (0..global.functions.len()) {
         data.compile_global_fn(&global, i);
     }
 
@@ -255,7 +259,7 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start
 struct CodeData<'a> {
     instructions: Vec<Instruction>,
     type_table: TypeTable,
-    label_count: uint,
+    label_count: usize,
     logger: &'a Logger<'a>,
     add_to_address: bool,
     const_mem: bool,
@@ -268,7 +272,7 @@ impl<'a> CodeData<'a> {
     }
 
     /// Generating a unique label id
-    fn next_unique_id(&mut self) -> uint {
+    fn next_unique_id(&mut self) -> usize {
         self.label_count += 1;
         self.label_count - 1
     }
@@ -278,7 +282,7 @@ impl<'a> CodeData<'a> {
     }
 
     /// Compile a global variable
-    fn compile_global_var(&mut self, scope: &Scope, var_id: uint) {
+    fn compile_global_var(&mut self, scope: &Scope, var_id: usize) {
         let is_const = scope.vars[var_id].is_const;
         if is_const != self.const_mem {
             if is_const { self.instructions.push(asm::RawAsm(CONST_DATA_SEGMENT.to_string())); }
@@ -289,7 +293,7 @@ impl<'a> CodeData<'a> {
         // Add the variable's label
         let label = match scope.vars[var_id].location {
             Label(ref s) => s.clone(),
-            ref other => panic!("ICE: Location of global var is not a label, was {}", other),
+            ref other => panic!("ICE: Location of global var is not a label, was {:?}", other),
         };
         self.instructions.push(asm::Label(label));
 
@@ -322,7 +326,7 @@ impl<'a> CodeData<'a> {
                                 self.instructions.push(asm::AllocateWords(unwrapped));
                             },
                             ref invalid => {
-                                panic!("Unable to statically resolve expression: `{}`", invalid)
+                                panic!("Unable to statically resolve expression: `{:?}`", invalid)
                             },
                         }
                     },
@@ -336,7 +340,7 @@ impl<'a> CodeData<'a> {
 
                     // TODO: Handle other types of static data
                     ref invalid => {
-                        println!("{}", invalid);
+                        println!("{:?}", invalid);
                         unimplemented!();
                     },
                 }
@@ -350,7 +354,7 @@ impl<'a> CodeData<'a> {
     }
 
     /// Compile a global function.
-    fn compile_global_fn(&mut self, scope: &Scope, fn_id: uint) {
+    fn compile_global_fn(&mut self, scope: &Scope, fn_id: usize) {
         // Add the functions label
         let label = scope.functions[fn_id].location.clone();
         let span = scope.functions[fn_id].ast.span.clone();
@@ -449,7 +453,7 @@ impl<'a> CodeData<'a> {
                         // Since this is a static array we don't need to dereference it
                     },
                     _invalid => {
-                        self.logger.report_error(format!("type `{}` cannot be dereferenced",
+                        self.logger.report_error(format!("type `{:?}` cannot be dereferenced",
                             "FIXME"), span);
                         self.fatal_error();
                     }
@@ -496,21 +500,24 @@ impl<'a> CodeData<'a> {
                 let mut bytes = vec![];
                 let mut str_slice = inner.as_slice();
                 loop {
-                    let (extracted_char, rest) = str_slice.slice_shift_char();
-                    let c = match extracted_char {
+                    let c = match str_slice.slice_shift_char() {
                         // Escape chars
-                        Some('\\') => {
-                            let (escaped_char, rest) = rest.slice_shift_char();
-                            str_slice = rest;
-                            match escaped_char {
-                                Some('n') => '\n',
-                                Some('0') => '\0',
-                                Some(invalid) => panic!("Invalid escape char: {}", invalid),
+                        Some(('\\', rest)) => {
+                            match rest.slice_shift_char() {
+                                Some(('n', rest)) => {
+                                    str_slice = rest;
+                                    '\n'
+                                },
+                                Some(('0', rest)) => {
+                                    str_slice = rest;
+                                    '\0'
+                                },
+                                Some((invalid, _)) => panic!("Invalid escape char: {}", invalid),
                                 None => panic!("ICE, end of string was escaped"),
                             }
                         },
                         // Normal chars
-                        Some(other) => {
+                        Some((other, rest)) => {
                             str_slice = rest;
                             other
                         },
@@ -567,14 +574,14 @@ impl<'a> CodeData<'a> {
                 match inner.fields.get(field) {
                     Some(&(offset, ref type_)) => (offset, type_.clone()),
                     None => {
-                        self.logger.report_error(format!("type `{}` has no field {}", target_type,
-                            field), span);
+                        self.logger.report_error(format!("type `{:?}` has no field {:?}", 
+                            target_type, field), span);
                         self.fatal_error();
                     }
                 }
             },
             ref invalid => {
-                self.logger.report_error(format!("type `{}` has no field {}", invalid, field),
+                self.logger.report_error(format!("type `{:?}` has no field {:?}", invalid, field),
                     span);
                 self.fatal_error();
             }
@@ -587,7 +594,7 @@ impl<'a> CodeData<'a> {
         match target_type {
             types::Pointer(..) | types::StaticArray(..) => {},
             _invalid => {
-                self.logger.report_error(format!("type `{}` cannot be dereferenced", "FIXME"),
+                self.logger.report_error(format!("type `{:?}` cannot be dereferenced", "FIXME"),
                     index_expr.span);
                 self.fatal_error();
             }
@@ -602,7 +609,7 @@ impl<'a> CodeData<'a> {
 
         // Multiply by the size of the target type
         let type_size = self.unaligned_size_of(target_type.deref());
-        self.multiply_by(type_size as uint);
+        self.multiply_by(type_size as usize);
 
         // Either replace or add to the current address
         if self.add_to_address {
@@ -947,7 +954,7 @@ impl<'a> CodeData<'a> {
                 // NOTE: types *must* be word aligned
                 let num_words = (self.size_of(other) / 4) as i16;
                 // Perform a load and store for each of the words
-                for i in range(0, num_words) {
+                for i in (0..num_words) {
                     self.instructions.push(asm::Load32(COPY_REG, asm::Const(i * 4), from));
                     self.instructions.push(asm::Store32(asm::Const(i * 4), to, COPY_REG));
                 }
@@ -1041,7 +1048,9 @@ impl<'a> CodeData<'a> {
         }
     }
 
-    fn multiply_by(&mut self, num: uint) {
+    fn multiply_by(&mut self, num: usize) {
+        use std::num::Float;
+
         // Check if it is a power of 2
         // TODO: Generate extra code for multiplications that are not a power of 2
         if !(num & (num - 1) == 0) {
@@ -1057,7 +1066,7 @@ impl<'a> CodeData<'a> {
     /// Check that a type is the same as the expected type or one path never returns
     fn check_type(&self, input: &Type, expected: &Type, span: InputSpan) {
         if input != &types::Bottom && expected != &types::Bottom && input != expected {
-            self.logger.report_error(format!("incorrect type, expected: {}, found: {}",
+            self.logger.report_error(format!("incorrect type, expected: {:?}, found: {:?}",
                 expected, input), span);
             self.fatal_error();
         }

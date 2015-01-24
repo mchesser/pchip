@@ -1,0 +1,697 @@
+### Adventure game - Michael Chesser 2014
+### Written in pchip (https://github.com/quvarxa/pchip), my programming language for DLX
+
+##
+## Core operations
+##
+fn add(a: int, b: int) -> int {
+    asm {
+        "        lw      r1,-8(r30)",
+        "        lw      r2,-4(r30)",
+        "        add     r1,r1,r2",
+    }
+}
+
+fn sub(a: int, b: int) -> int {
+    asm {
+        "        lw      r1,-8(r30)",
+        "        lw      r2,-4(r30)",
+        "        sub     r1,r1,r2",
+    }
+}
+
+
+fn equal(a: int, b: int) -> bool {
+    asm {
+        "        lw      r1,-8(r30)",
+        "        lw      r2,-4(r30)",
+        "        seq     r1,r1,r2",
+    }
+}
+
+fn not_equal(a: int, b: int) -> bool {
+    asm {
+        "        lw      r1,-8(r30)",
+        "        lw      r2,-4(r30)",
+        "        sne     r1,r1,r2",
+    }
+}
+
+
+fn less_than(a: int, b: int) -> bool {
+    asm {
+        "        lw      r1,-8(r30)",
+        "        lw      r2,-4(r30)",
+        "        slt     r1,r1,r2",
+    }
+}
+
+fn less_than_eq(a: int, b: int) -> bool {
+    asm {
+        "        lw      r1,-8(r30)",
+        "        lw      r2,-4(r30)",
+        "        sle     r1,r1,r2",
+    }
+}
+
+##
+## Constants
+##
+
+const LF = 13;
+const CR = 10;
+const MSG_AT = "You are at \0";
+const MSG_CANT = "You can't go that way\r\n\0";
+const MSG_CRLF = "\r\n\0";
+const MSG_DASH = "-----\0";
+const MSG_DIR = "Direction not specified\r\n\0";
+const MSG_DUP = "Node already exists\r\n\0";
+const MSG_DOES_NOT_EXIST = "Node does not exist\r\n\0";
+const MSG_LINK = "There are still links to this node\r\n\0";
+const MSG_NAME_MISSING = "Name not specified\r\n\0";
+const MSG_UNKNOWN_CMD = "Unknown command\r\n\0";
+const MSG_UNKNOWN_DIR = "Unknown direction\r\n\0";
+const MSG_ALREADY_LINKED = "There is already a link in that direction\r\n\0";
+
+const EXPLORE_PROMPT = "explore: \0";
+const CREATE_PROMPT = "create: \0";
+
+##
+## String handling
+##
+
+# Copy a string
+fn str_copy(source: *char, target: *char, target_cap: int) {
+    target_cap = sub(target_cap, 1);
+    let end = target_cap;
+    for i in range(0, target_cap) {
+        if (equal(source[i] as int, 0)) {
+            end = i;
+            break;
+        }
+        target[i] = source[i];
+    }
+    target[end] = 0 as char;
+}
+
+# Compare two strings
+fn str_cmp(a: *char, b: *char) -> int {
+    let i = 0;
+    while (not_equal(a[i] as int, 0)) {
+        if (less_than(a[i] as int, b[i] as int)) {
+            return -1;
+        }
+        if (less_than(b[i] as int, a[i] as int)) {
+            return 1;
+        }
+        i = add(i, 1);
+    }
+    0
+}
+
+# Get a string from the keyboard
+fn str_get(dest_str: *char, dest_cap: int) {
+    dest_cap = sub(dest_cap, 1);
+    let end = dest_cap;
+    # Read characters from keyboard
+    for i in range(0, dest_cap) {
+        let next_char = char_get();
+        if (equal(next_char as int, LF)) {
+            end = i;
+            break;
+        }
+        if (equal(next_char as int, CR)) {
+            end = i;
+            break;
+        }
+        char_put(next_char);
+        dest_str[i] = next_char;
+    }
+
+    dest_str[end] = 0 as char;
+}
+
+# Get a character from the keyboard
+fn char_get() -> char {
+    asm {
+        # Wait for a new key to be ready
+        "get1    lw      r1,KbdCtrl",
+        "        andi    r1,Kbd_Rdy",
+        "        bf      r1,get1",
+
+        # Load the keycode
+        "        lw      r1,KbdData",
+    }
+}
+
+# Write a string to the screen
+fn str_put(input: *char) {
+    let i = 0;
+    while (not_equal(input[i] as int, 0)) {
+        char_put(input[i]);
+        i = add(i, 1);
+    }
+}
+
+# Write a character to the screen
+fn char_put(_: char) {
+    asm {
+        # Load character from parameter
+        "        lb      r1,-4(r30)",
+
+        # Wait for display to be ready
+        "put1    lw      r2,DspCtrl",
+        "        andi    r2,Dsp_Rdy",
+        "        bf      r2,put1",
+
+        # Write the character to the screen
+        "        sw      DspData,r1",
+    }
+}
+
+# Convert a character to upper-case
+fn to_upper(_: char) -> char {
+    asm {
+        # Load character from the  parameter
+        "        lb      r1,-4(r30)",
+        # Convert lower to upper case
+        "        andi    r1,r1,16#5F",
+    }
+}
+
+
+##
+## Dynamic memory management
+##
+
+# Allocate memory using a simple arena based allocator, this provides the basis for more complicated
+# memory management. Memory allocated through this mechanism can never be reused by the program.
+fn arena_malloc(size: int) -> *any {
+    asm {
+        # Load the size we want to allocate from the parameter
+        "        lw      r1,-4(r30)",
+        # Increment the heap pointer
+        "        addu    r15,r15,r1",
+        # Return the old pointer
+        "        subu    r1,r15,r1",
+    }
+}
+
+struct NodeAllocatorList {
+    next: *NodeAllocatorList,
+    pad: [int, ..9],
+}
+
+let free_list = null as *NodeAllocatorList;
+
+fn alloc_node() -> *Node {
+    # If we are out of space in the free list, just allocate some new memory
+    if (equal(free_list as int, null as int)) {
+        arena_malloc(40) as *Node;
+    }
+    # Otherwise take the top element of the free list
+    else {
+        let return_val = free_list as *Node;
+        free_list = free_list.next;
+        return_val
+    }
+}
+
+fn free_node(node: *Node) {
+    let new_head = node as *NodeAllocatorList;
+    new_head.next = free_list;
+    free_list = new_head;
+}
+
+##
+## Map data data structures
+##
+
+struct Node {
+    name: [char, ..18],
+    count: int,
+    north: *Node,
+    east: *Node,
+    south: *Node,
+    west: *Node,
+}
+
+##
+## Global variables
+##
+let node_array: [*Node, ..14];
+let num_nodes = 6;
+let player_pos: *Node;
+
+let start: Node;
+let dead_end: Node;
+let forest: Node;
+let path: Node;
+let cliff: Node;
+let rocks: Node;
+
+##
+## Map functions
+##
+
+# Move the player to the node specified, if it is null then print an error message
+fn move_to(node: *Node) {
+    if (equal(node as int, null as int)) {
+        # This direction is invalid
+        str_put(&MSG_CANT[0]);
+    }
+    else {
+        player_pos = node;
+        print_location();
+    }
+}
+
+# Find a node in the node array, returning null if the node does not exist
+fn get_node(name: *char) -> **Node {
+    for i in range(0, num_nodes) {
+        let node = node_array[i];
+        if (equal(str_cmp(name, &node.name[0]), 0)) {
+            return &node_array[i];
+        }
+    }
+    null as **Node
+}
+
+# Add a link, ensuring that the target's link count is correctly set
+fn add_link(link: **Node, link_target: *Node) {
+    if (equal(*link as int, null as int)) {
+        link_target.count = add(link_target.count, 1);
+        *link = link_target;
+    }
+    else {
+        str_put(&MSG_ALREADY_LINKED[0]);
+    }
+}
+
+# Remove a link, ensuring that the target's link count is correctly set
+fn remove_link(link: **Node) {
+    let link_target = *link;
+    if (not_equal(link_target as int, null as int)) {
+        *link = null as *Node;
+        link_target.count = sub(link_target.count, 1);
+    }
+}
+
+# Print the player's current location
+fn print_location() {
+    str_put(&MSG_AT[0]);
+    print_node_name(player_pos);
+    str_put(&MSG_CRLF[0]);
+}
+
+# Print out the entire map
+fn print_map() {
+    for i in range(0, num_nodes) {
+        print_node_name(node_array[i]);
+        char_put(':');
+        char_put(' ');
+        print_node_name(node_array[i].north);
+        char_put(' ');
+        print_node_name(node_array[i].east);
+        char_put(' ');
+        print_node_name(node_array[i].south);
+        char_put(' ');
+        print_node_name(node_array[i].west);
+        str_put(&MSG_CRLF[0]);
+    }
+}
+
+# Print out the name of a node
+fn print_node_name(node: *Node) {
+    if (equal(node as int, null as int)) {
+        str_put(&MSG_DASH[0]);
+    }
+    else {
+        str_put(&node.name[0]);
+    }
+}
+
+# Zap the map - Deletes all nodes from the map, leaving only the start node with no outgoing links
+fn zap_map() {
+    # Delete all the nodes except for the start node
+    for i in range(1, num_nodes) {
+        free_node(node_array[i]);
+    }
+    num_nodes = 1;
+
+    # Clear links from the start node
+    node_array[0].count = 1;
+    node_array[0].north = null as *Node;
+    node_array[0].east = null as *Node;
+    node_array[0].south = null as *Node;
+    node_array[0].west = null as *Node;
+
+    # Move the player back to the start
+    player_pos = node_array[0];
+}
+
+# Add a new node to the map
+fn add_node(name: *char) {
+    # Check that this node is not a duplicate
+    if (not_equal(get_node(name) as int, null as int)) {
+        str_put(&MSG_DUP[0]);
+        return;
+    }
+
+    # Allocate and initialise a new node
+    let new_node = alloc_node();
+    str_copy(name, &new_node.name[0], 10);
+    new_node.count = 0;
+    new_node.north = null as *Node;
+    new_node.east = null as *Node;
+    new_node.south = null as *Node;
+    new_node.west = null as *Node;
+
+    node_array[num_nodes] = new_node;
+    num_nodes = add(num_nodes, 1);
+}
+
+fn delete_node(name: *char) {
+    # Find the node's location in the node array
+    let target = get_node(name);
+    let node = *target;
+
+    # Check if this node exists
+    if (equal(target as int, null as int)) {
+        str_put(&MSG_DOES_NOT_EXIST[0]);
+        return;
+    }
+
+    # Ensure that this node has no links
+    if (not_equal(node.count, 0)) {
+        str_put(&MSG_LINK[0]);
+        return;
+    }
+
+    # Remove all outgoing links from this node
+    remove_link(&node.north);
+    remove_link(&node.east);
+    remove_link(&node.south);
+    remove_link(&node.west);
+
+    # If the player is here move them back to the start
+    if (equal(node as int, player_pos as int)) {
+        player_pos = node_array[0];
+    }
+
+    # Free the node
+    free_node(node);
+
+    # Replace the target node with the last node and set the new length
+    num_nodes = sub(num_nodes, 1);
+    *target = node_array[num_nodes];
+}
+
+# Hook one node to another
+fn hook(from: *char, to: *char, dir: char) {
+    let from_node_ptr = get_node(from);
+    if (equal(from_node_ptr as int, null as int)) {
+        str_put(&MSG_DOES_NOT_EXIST[0]);
+        return;
+    }
+    
+    let to_node_ptr = get_node(to);
+    if (equal(to_node_ptr as int, null as int)) {
+        str_put(&MSG_DOES_NOT_EXIST[0]);
+        return;
+    }
+    
+    let from_node = *from_node_ptr;
+    let to_node = *to_node_ptr;
+
+    if (equal(dir as int, 'N' as int)) {
+        add_link(&from_node.north, to_node);
+    }
+    else if (equal(dir as int, 'E' as int)) {
+        add_link(&from_node.east, to_node);
+    }
+    else if (equal(dir as int, 'S' as int)) {
+        add_link(&from_node.south, to_node);
+    }
+    else if (equal(dir as int, 'W' as int)) {
+        add_link(&from_node.west, to_node);
+    }
+    else {
+        str_put(&MSG_UNKNOWN_DIR[0]);
+    }
+}
+
+fn print_test(string: *char) {
+    char_put('[');
+    str_put(string);
+    char_put(']');
+    str_put(&MSG_CRLF[0]);
+}
+
+# Unhook a direction from a node
+fn unhook(from: *char, dir: char) {
+    let from_node_ptr = get_node(from);
+    if (equal(from_node_ptr as int, null as int)) {
+        str_put(&MSG_DOES_NOT_EXIST[0]);
+        return;
+    }
+    
+    let from_node = *from_node_ptr;
+
+    if (equal(dir as int, 'N' as int)) {
+        remove_link(&from_node.north);
+    }
+    else if (equal(dir as int, 'E' as int)) {
+        remove_link(&from_node.east);
+    }
+    else if (equal(dir as int, 'S' as int)) {
+        remove_link(&from_node.south);
+    }
+    else if (equal(dir as int, 'W' as int)) {
+        remove_link(&from_node.west);
+    }
+    else {
+        str_put(&MSG_UNKNOWN_DIR[0]);
+    }
+}
+
+# Parse a word from a string, modifying the string so that it is after the word, and returning a
+# a pointer to the word, which is null terminated
+fn parse_word(string: **char) -> *char {
+    if (equal(*string[0] as int, null as int)) {
+        return null as *char;
+    }
+
+    let word_start = *string;
+    let word_end = *string;
+    loop {
+        if (equal(word_end[0] as int, 0)) {
+            *string = &word_end[0];
+            return word_start;
+        }
+        if (equal(word_end[0] as int, ' ' as int)) {
+            word_end[0] = 0 as char;
+            *string = &word_end[1];
+            return word_start;
+        }
+        word_end = &word_end[1];
+    }
+}
+
+# Program entry point
+fn main() {
+    # Initialize the starting map
+    node_array[0] = &start;
+    node_array[1] = &dead_end;
+    node_array[2] = &forest;
+    node_array[3] = &path;
+    node_array[4] = &cliff;
+    node_array[5] = &rocks;
+
+    start = Node {
+        name: "Start\0            ",
+        count: 5,
+        north: &forest,
+        east: &cliff,
+        south: &path,
+        west: &dead_end,
+    };
+
+    dead_end = Node {
+        name: "Dead-end\0         ",
+        count: 1,
+        north: null as *Node,
+        east: &start,
+        south: null as *Node,
+        west: null as *Node,
+    };
+
+    forest = Node {
+        name: "Forest\0           ",
+        count: 4,
+        north: &start,
+        east: &forest,
+        south: &forest,
+        west: &path,
+    };
+
+    path = Node {
+        name: "Path\0             ",
+        count: 3,
+        north: null as *Node,
+        east: &forest,
+        south: &cliff,
+        west: &start,
+    };
+
+    cliff = Node {
+        name: "Cliff\0            ",
+        count: 2,
+        north: &path,
+        east: &rocks,
+        south: null as *Node,
+        west: &start,
+    };
+
+    rocks = Node {
+        name: "Rocks\0            ",
+        count: 1,
+        north: null as *Node,
+        east: null as *Node,
+        south: null as *Node,
+        west: null as *Node,
+    };
+
+    player_pos = &start;
+    let explore_mode = true;
+    print_location();
+
+    let command_buf: [char, ..40];
+    loop {
+        # Prompt the user
+        if (explore_mode) {
+            str_put(&EXPLORE_PROMPT[0]);
+        }
+        else {
+            str_put(&CREATE_PROMPT[0]);
+        }
+
+        # Get the command from the user
+        let command = &command_buf[0];
+        str_get(command, 40);
+        str_put(&MSG_CRLF[0]);
+
+        # The first character is the action character
+        let action = to_upper(command[0]);
+        let name1: *char;
+        let dir: *char;
+        let name2: *char;
+
+        parse_word(&command);
+
+        if (explore_mode) {
+            if (equal(action as int, 'N' as int)) {
+                move_to(player_pos.north);
+            }
+            else if (equal(action as int, 'E' as int)) {
+                move_to(player_pos.east);
+            }
+            else if (equal(action as int, 'S' as int)) {
+                move_to(player_pos.south);
+            }
+            else if (equal(action as int, 'W' as int)) {
+                move_to(player_pos.west);
+            }
+            else if (equal(action as int, 'C' as int)) {
+                explore_mode = false;
+            }
+            else {
+                str_put(&MSG_UNKNOWN_CMD[0]);
+            }
+        }
+        # Create mode
+        else {
+            if (equal(action as int, 'P' as int)) {
+                print_map();
+            }
+            else if (equal(action as int, 'Z' as int)) {
+                zap_map();
+            }
+            else if (equal(action as int, 'N' as int)) {
+                name1 = parse_word(&command);
+                # Check if first param exists
+                if (not_equal(name1 as int, null as int)) {
+                    add_node(name1);
+                }
+                else {
+                    # Name was not specified
+                    str_put(&MSG_NAME_MISSING[0]);
+                }
+            }
+            else if (equal(action as int, 'D' as int)) {
+                name1 = parse_word(&command);
+                # Check if first param exists
+                if (not_equal(name1 as int, null as int)) {
+                    delete_node(name1);
+                }
+                else {
+                     # Name was not specified
+                    str_put(&MSG_NAME_MISSING[0]);
+                }
+            }
+            else if (equal(action as int, 'H' as int)) {
+                name1 = parse_word(&command);
+                # Check if first param exists
+                if (not_equal(name1 as int, null as int)) {
+                    dir = parse_word(&command);
+                    # Check if second param exists
+                    if (not_equal(dir as int, null as int)) {
+                        name2 = parse_word(&command);
+                        # Check if third param exists
+                        if (not_equal(name2 as int, null as int)) {
+                            hook(name1, name2, to_upper(dir[0]));
+                        }
+                        else {
+                            # Name was not specified
+                            str_put(&MSG_NAME_MISSING[0]);
+                        }
+                    }
+                    else {
+                        # Direction was not specified
+                        str_put(&MSG_DIR[0]);
+                    }
+                }
+                else {
+                     # Name was not specified
+                    str_put(&MSG_NAME_MISSING[0]);
+                }
+            }
+            else if (equal(action as int, 'U' as int)) {
+                # Check if first param exists
+                name1 = parse_word(&command);
+                if (not_equal(name1 as int, null as int)) {
+                    # Check if second param exists
+                    dir = parse_word(&command);
+                    if (not_equal(dir as int, null as int)) {
+                        unhook(name1, to_upper(dir[0]));
+                    }
+                    else {
+                        # Direction was not specified
+                        str_put(&MSG_DIR[0]);
+                    }
+                }
+                else {
+                     # Name was not specified
+                    str_put(&MSG_NAME_MISSING[0]);
+                }
+            }
+            else if (equal(action as int, 'X' as int)) {
+                explore_mode = true;
+            }
+            else {
+                str_put(&MSG_UNKNOWN_CMD[0]);
+            }
+        }
+
+    }
+}

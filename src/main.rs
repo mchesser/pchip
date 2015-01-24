@@ -1,9 +1,11 @@
-#![feature(tuple_indexing)]
+#![feature(box_syntax)]
+#![allow(unstable)]
 
 use std::io::File;
 use std::os;
 
 use std::cmp::min;
+use std::iter;
 
 use parser::parse;
 use lexer::Lexer;
@@ -24,11 +26,11 @@ fn main() {
     }
     let mut file = match File::open(&Path::new(args[1].clone())) {
         Ok(f) => f,
-        Err(err) => panic!("Error opening file: {}", err)
+        Err(e) => panic!("Error opening file: {}", e)
     };
     let input = match file.read_to_string() {
         Ok(input) => input,
-        Err(err)  => panic!("Error reading file: {}", err)
+        Err(e)  => panic!("Error reading file: {}", e)
     };
 
     let logger = Logger::new(input.as_slice(), true);
@@ -56,8 +58,8 @@ fn main() {
                 program_string.push('\n');
             },
             other => {
-                let data = other.into_string();
-                program_string.grow(8 - min(7, space), ' ');
+                let data = other.to_string();
+                program_string.extend(iter::repeat(' ').take(8 - min(7, space)));
                 program_string.push_str(data.as_slice());
                 program_string.push('\n');
                 space = 0;

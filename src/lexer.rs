@@ -1,7 +1,7 @@
-use std::char::is_whitespace;
 use error::InputPos;
+pub use lexer::TokenValue::*;
 
-#[deriving(PartialEq, Clone, Show)]
+#[derive(PartialEq, Clone, Show)]
 pub enum TokenValue {
     LeftParen,
     RightParen,
@@ -60,7 +60,7 @@ pub enum TokenValue {
     Ident(String),
 }
 
-#[deriving(Show)]
+#[derive(Show)]
 pub struct Token {
     pub value: TokenValue,
     pub pos: InputPos,
@@ -80,30 +80,32 @@ impl<'a> Lexer<'a> {
     }
 
     fn bump(&mut self) {
-        let (val, rest) = self.remaining.slice_shift_char();
-        match val {
+        match self.remaining.slice_shift_char() {
             // Move to the next line
-            Some('\n') => {
+            Some(('\n', rest)) => {
                 self.pos.line += 1;
                 self.pos.col = 0;
+                self.remaining = rest;
             },
 
             // Discard carrage return characters
-            Some('\r') => {},
+            Some(('\r', rest)) => self.remaining = rest,
 
             // For other characters increase the column position
-            Some(_) => self.pos.col += 1,
+            Some((_, rest)) => {
+                self.pos.col += 1;
+                self.remaining = rest;
+            }
 
             None => {},
         }
-        self.remaining = rest;
     }
 
     fn read_white_space_or_comment(&mut self) {
         while self.remaining.len() > 0 {
             match self.remaining.char_at(0) {
                 // Match whitespace
-                c if is_whitespace(c) => self.bump(),
+                c if c.is_whitespace() => self.bump(),
 
                 // Match comments
                 '#' => {
@@ -120,7 +122,9 @@ impl<'a> Lexer<'a> {
     }
 }
 
-impl<'a> Iterator<Token> for Lexer<'a> {
+impl<'a> Iterator for Lexer<'a> {
+    type Item = Token;
+
     fn next(&mut self) -> Option<Token> {
         // Read up to the next proper token
         self.read_white_space_or_comment();
@@ -181,8 +185,8 @@ impl<'a> Iterator<Token> for Lexer<'a> {
 
             '0'...'9' => {
                 token_len = scan_token(self.remaining);
-                let number_str = self.remaining.slice_to(token_len);
-                match from_str(number_str) {
+                let number_str = &self.remaining[..token_len];
+                match number_str.parse() {
                     Some(n) => LitNum(n),
                     None => panic!("Invalid number"),
                 }
@@ -196,7 +200,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
                         panic!("Unclosed \" ");
                     },
                 };
-                let result = LitString(self.remaining.slice_to(token_len).into_string());
+                let result = LitString(self.remaining[..token_len].to_string());
                 token_len += 1;
                 result
             },
@@ -216,7 +220,7 @@ impl<'a> Iterator<Token> for Lexer<'a> {
 
             _ => {
                 token_len = scan_token(self.remaining);
-                let token_str = self.remaining.slice_to(token_len);
+                let token_str = &self.remaining[..token_len];
                 match token_str {
                     "let"    => Let,
                     "const"  => Const,
@@ -247,16 +251,16 @@ impl<'a> Iterator<Token> for Lexer<'a> {
 
         let token = Token {
             value: token_val,
-            pos: self.pos.clone(),
+            pos: self.pos,
         };
         self.pos.col += token_len;
-        self.remaining = self.remaining.slice_from(token_len);
+        self.remaining = &self.remaining[token_len..];
         Some(token)
     }
 }
 
 /// Scans till the end of the token returning the index of the end of the token
-fn scan_token(string: &str) -> uint {
+fn scan_token(string: &str) -> usize {
     const TOKEN_BOUNDS: &'static [char] = &[
         ' ', '\t', '\n', '\r', '#', ':', ';', ',', '(', ')', '{', '}', '[', ']', '.', '*', '&', '=',
         '+', '-', '"', '\'',

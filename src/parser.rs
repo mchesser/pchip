@@ -7,7 +7,7 @@ pub fn parse<'a>(mut lexer: Lexer, logger: &'a Logger<'a>) -> ast::Program {
     let mut tokens: Vec<lexer::Token> = lexer.collect();
     let end_token = lexer::Token {
         value: lexer::Eof,
-        pos: tokens.last().map(|t| t.pos.clone()).unwrap_or(InputPos::start()),
+        pos: tokens.last().map(|t| t.pos).unwrap_or(InputPos::start()),
     };
     tokens.push(end_token);
     let mut parser = Parser {
@@ -22,7 +22,7 @@ pub fn parse<'a>(mut lexer: Lexer, logger: &'a Logger<'a>) -> ast::Program {
 struct Parser<'a> {
     tokens: Vec<lexer::Token>,
     logger: &'a Logger<'a>,
-    index: uint,
+    index: usize,
     fake_semicolon: bool,
 }
 
@@ -44,7 +44,7 @@ impl<'a> Parser<'a> {
         let span_start = self.current_pos();
         let next = self.next_token();
         if next != token {
-            self.logger.report_error(format!("expected `{}` but found `{}`", token, next),
+            self.logger.report_error(format!("expected `{:?}` but found `{:?}`", token, next),
                 InputSpan::new(span_start, self.current_pos()));
             self.fatal_error();
         }
@@ -55,7 +55,7 @@ impl<'a> Parser<'a> {
     }
 
     fn current_pos(&self) -> InputPos {
-        self.tokens[self.index].pos.clone()
+        self.tokens[self.index].pos
     }
 
     fn parse(&mut self) -> ast::Program {
@@ -98,7 +98,7 @@ impl<'a> Parser<'a> {
             lexer::Eof => return None,
 
             invalid => {
-                self.logger.report_error(format!("expected `<Item>` but found, `{}`", invalid),
+                self.logger.report_error(format!("expected `<Item>` but found, `{:?}`", invalid),
                     InputSpan::new(span_start, self.current_pos()));
                 self.fatal_error();
             },
@@ -151,7 +151,7 @@ impl<'a> Parser<'a> {
             },
 
             invalid => {
-                self.logger.report_error(format!("expected `{{` or `->` but found `{}`", invalid),
+                self.logger.report_error(format!("expected `{{` or `->` but found `{:?}`", invalid),
                     InputSpan::new(type_span_start, self.current_pos()));
                 self.fatal_error();
             },
@@ -231,7 +231,7 @@ impl<'a> Parser<'a> {
             },
             lexer::SemiColon => None,
             invalid => {
-                self.logger.report_error(format!("expected `=` or `;` but found `{}`",
+                self.logger.report_error(format!("expected `=` or `;` but found `{:?}`",
                     invalid), InputSpan::new(span_start, self.current_pos()));
                 self.fatal_error();
             }
@@ -244,7 +244,7 @@ impl<'a> Parser<'a> {
                 assignment.rhs.rtype.clone()
             },
             (&None, &None) => {
-                self.logger.report_error(format!("could not determine type for variable `{}`",
+                self.logger.report_error(format!("could not determine type for variable `{:?}`",
                     name), InputSpan::new(span_start, self.current_pos()));
                 self.fatal_error();
             },
@@ -265,7 +265,7 @@ impl<'a> Parser<'a> {
             lexer::Ident(name) => name.clone(),
 
             invalid => {
-                self.logger.report_error(format!("expected `<identifer>` but found `{}`", invalid),
+                self.logger.report_error(format!("expected `<identifer>` but found `{:?}`", invalid),
                     InputSpan::new(span_start, self.current_pos()));
                 self.fatal_error();
             },
@@ -296,7 +296,7 @@ impl<'a> Parser<'a> {
                 let size = match self.next_token() {
                     lexer::LitNum(n) => n,
                     invalid => {
-                        self.logger.report_error(format!("expected `<integer>` but found `{}`",
+                        self.logger.report_error(format!("expected `<integer>` but found `{:?}`",
                             invalid), InputSpan::new(span_start, self.current_pos()));
                         self.fatal_error();
                     },
@@ -306,7 +306,7 @@ impl<'a> Parser<'a> {
             },
 
             invalid => {
-                self.logger.report_error(format!("expected `<Type>` but found `{}`", invalid),
+                self.logger.report_error(format!("expected `<Type>` but found `{:?}`", invalid),
                     InputSpan::new(span_start, self.current_pos()));
                 self.fatal_error();
             },
@@ -319,7 +319,7 @@ impl<'a> Parser<'a> {
             (name, Some(t)) => (name, t),
             (name, None) => {
                 let span_end = self.current_pos();
-                self.logger.report_error(format!("expected `<Type>` for parameter `{}`", name),
+                self.logger.report_error(format!("expected `<Type>` for parameter `{:?}`", name),
                     InputSpan::new(span_start, span_end));
                 self.fatal_error();
             },
@@ -399,9 +399,9 @@ impl<'a> Parser<'a> {
                 let deref_target = match self.next_token() {
                     lexer::Ident(name) => self.handle_ident(name.to_string(), span_start),
                     invalid => {
-                        self.logger.report_error(format!("expected `<Ident>` but found `{}`",
+                        self.logger.report_error(format!("expected `<Ident>` but found `{:?}`",
                             invalid), InputSpan::new(span_start, self.current_pos()));
-                        println!("ICE: FIXME, allow arbitrary expression dereferencing")
+                        println!("ICE: FIXME, allow arbitrary expression dereferencing");
                         self.fatal_error();
                     },
                 };
@@ -483,8 +483,8 @@ impl<'a> Parser<'a> {
                 }
             },
             invalid => {
-                self.logger.report_error(format!("expected `<Expression>` but found `{}`", invalid),
-                    InputSpan::new(span_start, self.current_pos()));
+                self.logger.report_error(format!("expected `<Expression>` but found `{:?}`",
+                    invalid), InputSpan::new(span_start, self.current_pos()));
                 self.fatal_error();
             },
         };
@@ -730,7 +730,7 @@ impl<'a> Parser<'a> {
                     self.bump();
                     let else_if_span_start = self.current_pos();
                     let inner_block = ast::Block {
-                        statements: vec![self.parse_if(else_if_span_start.clone())],
+                        statements: vec![self.parse_if(else_if_span_start)],
                         span: InputSpan::new(else_if_span_start, self.current_pos()),
                     };
                     Some(inner_block)
@@ -902,7 +902,7 @@ impl<'a> Parser<'a> {
                 },
                 invalid => {
                     self.logger.report_error(
-                        format!("expected `\"<string>\"` or `}}` but found, `{}`", invalid),
+                        format!("expected `\"<string>\"` or `}}` but found, `{:?}`", invalid),
                         InputSpan::new(span_start, self.current_pos()));
                     self.fatal_error();
                 },
@@ -916,7 +916,7 @@ impl<'a> Parser<'a> {
                 },
                 invalid => {
                     self.logger.report_error(
-                        format!("expected `,` or `}}` but found, `{}`", invalid),
+                        format!("expected `,` or `}}` but found, `{:?}`", invalid),
                         InputSpan::new(span_start, self.current_pos()));
                     self.fatal_error();
                 },

@@ -1,8 +1,11 @@
+pub use self::Instruction::*;
+pub use self::Value::*;
+
 use std::fmt;
 
-pub type RegId = uint;
-pub type SpecialRegId = uint;
-pub type TrapId = uint;
+pub type RegId = usize;
+pub type SpecialRegId = usize;
+pub type TrapId = usize;
 pub type LabelId = String;
 
 pub enum Value {
@@ -10,7 +13,7 @@ pub enum Value {
     Unknown(LabelId),
 }
 
-impl fmt::Show for Value {
+impl fmt::String for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &Const(val) => write!(f, "{}", val),
@@ -121,7 +124,7 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    pub fn into_string(self) -> String {
+    pub fn to_string(self) -> String {
         match self {
             Load8(j, s, i)   => format!("lb      r{},{}(r{})", j, s, i),
             Load8u(j, s, i)  => format!("lbu     r{},{}(r{})", j, s, i),
@@ -188,7 +191,7 @@ impl Instruction {
 
             Label(name) => name,
             AllocateBytes(values) => {
-                let mut base = ".byte   ".into_string();
+                let mut base = ".byte   ".to_string();
                 for &value in values.iter() {
                     base.push_str((format!("{},", value)).as_slice());
                 }
@@ -196,7 +199,7 @@ impl Instruction {
                 base
             },
             AllocateHalfWords(values) => {
-                let mut base = ".half   ".into_string();
+                let mut base = ".half   ".to_string();
                 for &value in values.iter() {
                     base.push_str((format!("{},", value)).as_slice());
                 }
@@ -204,7 +207,7 @@ impl Instruction {
                 base
             },
             AllocateWords(values) => {
-                let mut base = ".word   ".into_string();
+                let mut base = ".word   ".to_string();
                 for &value in values.iter() {
                     base.push_str((format!("{},", value)).as_slice());
                 }

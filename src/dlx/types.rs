@@ -5,9 +5,13 @@ use ast;
 use dlx::codegen;
 use error::InputSpan;
 
-type TypeId = uint;
+pub use self::CompositeType::*;
+pub use self::BaseType::*;
+pub use self::Type::*;
 
-#[deriving(Clone)]
+type TypeId = usize;
+
+#[derive(Clone)]
 pub struct CompositeType {
     pub name: String,
     pub fields: HashMap<String, (u16, Type)>,
@@ -40,7 +44,7 @@ impl fmt::Show for CompositeType {
     }
 }
 
-#[deriving(Show, Clone)]
+#[derive(Show, Clone)]
 pub enum BaseType {
     Bool,
     Int,
@@ -64,7 +68,7 @@ impl BaseType {
 }
 
 /// A resolved type
-#[deriving(Show, Clone, PartialEq)]
+#[derive(Show, Clone, PartialEq)]
 pub enum Type {
     Normal(TypeId),
     StaticArray(Box<Type>, u16),
@@ -78,13 +82,13 @@ impl Type {
         match *self {
             StaticArray(ref inner, _) => &**inner,
             Pointer(ref inner) => &**inner,
-            ref invalid => panic!("ICE: Attempted to dereference `{}`", invalid),
+            ref invalid => panic!("ICE: Attempted to dereference `{:?}`", invalid),
         }
     }
 }
 
 pub struct TypeTable {
-    type_map: HashMap<ast::Type, uint>,
+    type_map: HashMap<ast::Type, usize>,
     types: Vec<BaseType>,
 }
 
@@ -105,7 +109,7 @@ impl TypeTable {
                         *inner.clone()
                     },
                     invalid => {
-                        panic!("type `{}` cannot be dereferenced", invalid);
+                        panic!("type `{:?}` cannot be dereferenced", invalid);
                     }
                 }
             },
@@ -115,7 +119,7 @@ impl TypeTable {
                     Composite(ref target_type) => {
                         (target_type.fields[field_name.clone()].1).clone()
                     },
-                    ref invalid => panic!("type `{}` has no field `{}`", invalid, field_name),
+                    ref invalid => panic!("type `{:?}` has no field `{:?}`", invalid, field_name),
                 }
             },
             ast::Primitive(ast::BottomType) => Bottom,
@@ -130,7 +134,7 @@ impl TypeTable {
         match *type_ {
             Normal(id) => &self.types[id],
             Pointer(ref inner) => self.base_type(&**inner),
-            ref invalid => panic!("There is no base type associated with {}", invalid),
+            ref invalid => panic!("There is no base type associated with {:?}", invalid),
         }
     }
 
@@ -167,7 +171,7 @@ fn align(size: u16) -> u16 {
 }
 
 struct TypeGenData<'a> {
-    unresolved_map: HashMap<String, (uint, ast::StructDeclaration)>,
+    unresolved_map: HashMap<String, (usize, ast::StructDeclaration)>,
     type_table: TypeTable,
     fake_scope: codegen::Scope<'a>,
 }
@@ -252,7 +256,7 @@ impl<'a> TypeGenData<'a> {
             },
 
             // No other types are valid here
-            ref invalid => panic!("unexpected type: {}", invalid),
+            ref invalid => panic!("unexpected type: {:?}", invalid),
         }
     }
 }
