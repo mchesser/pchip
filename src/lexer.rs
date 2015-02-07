@@ -1,7 +1,7 @@
 use error::InputPos;
 pub use lexer::TokenValue::*;
 
-#[derive(PartialEq, Clone, Show)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum TokenValue {
     LeftParen,
     RightParen,
@@ -60,7 +60,7 @@ pub enum TokenValue {
     Ident(String),
 }
 
-#[derive(Show)]
+#[derive(Debug)]
 pub struct Token {
     pub value: TokenValue,
     pub pos: InputPos,
@@ -187,8 +187,8 @@ impl<'a> Iterator for Lexer<'a> {
                 token_len = scan_token(self.remaining);
                 let number_str = &self.remaining[..token_len];
                 match number_str.parse() {
-                    Some(n) => LitNum(n),
-                    None => panic!("Invalid number"),
+                    Ok(n) => LitNum(n),
+                    Err(e) => panic!("ICE: Invalid number: {}", e),
                 }
             },
 

@@ -5,14 +5,14 @@ pub use ast::PrimitiveType::*;
 pub use ast::Type::*;
 pub use ast::Expr::*;
 
-#[derive(Show)]
+#[derive(Debug)]
 pub struct Program {
     pub items: Vec<Item>,
     pub span: InputSpan,
 }
 
 // A top level item
-#[derive(Show)]
+#[derive(Debug)]
 pub enum Item {
     FunctionItem(FunctionDeclaration),
     StructItem(StructDeclaration),
@@ -29,7 +29,7 @@ impl Item {
     }
 }
 
-#[derive(Show, Hash, Clone, PartialEq, Eq)]
+#[derive(Debug, Hash, Clone, PartialEq, Eq)]
 pub enum PrimitiveType {
     UnitType,
     IntType,
@@ -39,7 +39,7 @@ pub enum PrimitiveType {
     BottomType,
 }
 
-#[derive(Show, Hash, Clone, PartialEq, Eq)]
+#[derive(Debug, Hash, Clone, PartialEq, Eq)]
 pub enum Type {
     Primitive(PrimitiveType),
     Pointer(Box<Type>),
@@ -50,14 +50,14 @@ pub enum Type {
     VariableType(String),
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct Expression {
     pub expr: Box<Expr>,
     pub rtype: Type,
     pub span: InputSpan,
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub enum Expr {
     // Control flow
     IfExpr(IfStatement),
@@ -88,7 +88,7 @@ pub enum Expr {
     EmptyExpr,
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct Block {
     pub statements: Vec<Expression>,
     pub span: InputSpan,
@@ -103,7 +103,7 @@ impl Block {
     }
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct IfStatement {
     pub condition: Expression,
     pub body: Block,
@@ -111,13 +111,13 @@ pub struct IfStatement {
     pub span: InputSpan,
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct LoopStatement {
     pub body: Block,
     pub span: InputSpan,
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct ForLoopStatement {
     pub loop_var: String,
     pub start: Expression,
@@ -126,14 +126,14 @@ pub struct ForLoopStatement {
     pub span: InputSpan,
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct StructDeclaration {
     pub name: String,
     pub fields: Vec<(String, Type)>,
     pub span: InputSpan,
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct FunctionDeclaration {
     pub name: String,
     pub params: Vec<(String, Type)>,
@@ -142,14 +142,14 @@ pub struct FunctionDeclaration {
     pub span: InputSpan,
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct FunctionCall {
     pub name: String,
     pub args: Vec<Expression>,
     pub span: InputSpan,
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct LetStatement {
     pub name: String,
     pub var_type: Type,
@@ -158,34 +158,34 @@ pub struct LetStatement {
     pub span: InputSpan,
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct Assignment {
     pub target: Expression,
     pub rhs: Expression,
     pub span: InputSpan,
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct StructInit {
     pub type_name: String,
     pub field_init: Vec<(String, Expression)>,
     pub span: InputSpan,
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct StaticArray {
     pub elements: Vec<Expression>,
     pub span: InputSpan,
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct FieldRef {
     pub field: String,
     pub target: Expression,
     pub span: InputSpan,
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct ArrayIndex {
     pub index: Expression,
     pub target: Expression,

@@ -84,7 +84,7 @@ impl Function {
     }
 }
 
-#[derive(Clone, Show)]
+#[derive(Clone, Debug)]
 enum Location {
     Label(LabelId),
     Offset(i16),
@@ -211,7 +211,7 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start
     };
 
     // Parse globals
-    for item in program.items.into_iter() {
+    for item in program.items {
         match item {
             ast::FunctionItem(fn_item) => {
                 let id = FnIdentId(global.functions.len());
@@ -302,8 +302,8 @@ impl<'a> CodeData<'a> {
         match scope.vars[var_id].ast.assignment {
             // Initialized variables
             Some(ref expr) => {
-                let rhs_expr = match *expr.rhs.expr {
-                    ast::CastExpr(ref inner) => &*inner.expr,
+                let rhs_expr: &ast::Expr = match *expr.rhs.expr {
+                    ast::CastExpr(ref inner) => &inner.expr,
                     ref other => other,
                 };
 
@@ -317,7 +317,7 @@ impl<'a> CodeData<'a> {
                             // Array of integers
                             ast::LitNumExpr(..) => {
                                 let mut unwrapped = vec![];
-                                for element in inner.elements.iter() {
+                                for element in &inner.elements {
                                     match *element.expr {
                                         ast::LitNumExpr(n) => unwrapped.push(n as i32),
                                         ref _invalid => panic!("Array has not literal value"),
@@ -420,7 +420,7 @@ impl<'a> CodeData<'a> {
     }
 
     fn compile_block(&mut self, scope: &mut Scope, block: &ast::Block) {
-        for statement in block.statements.iter() {
+        for statement in &block.statements {
             self.compile_expression(scope, statement);
         }
     }
@@ -498,7 +498,7 @@ impl<'a> CodeData<'a> {
                 // Convert the string into a byte array
                 // FIXME: this should happen in the lexer/parser
                 let mut bytes = vec![];
-                let mut str_slice = inner.as_slice();
+                let mut str_slice: &str = &inner;
                 loop {
                     let c = match str_slice.slice_shift_char() {
                         // Escape chars
@@ -779,7 +779,7 @@ impl<'a> CodeData<'a> {
         let mut call_args = vec![];
         // Keep track of the offset of the stack, so that we can restore it later.
         let mut stack_offset = 0;
-        for arg in call.args.iter() {
+        for arg in &call.args {
             let arg_type = self.resolve_type(scope, &arg.rtype);
             let arg_size = self.size_of(&arg_type);
 
@@ -870,7 +870,7 @@ impl<'a> CodeData<'a> {
         // Reserve memory for the struct
         self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER, struct_size));
 
-        for &(ref field_name, ref expression) in struct_init.field_init.iter() {
+        for &(ref field_name, ref expression) in &struct_init.field_init {
             let (field_offset, field_type) = self.find_field(&struct_base_type, field_name,
                 struct_init.span.clone());
 

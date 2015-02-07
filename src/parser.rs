@@ -3,7 +3,7 @@ use error::{InputPos, InputSpan, Logger};
 use lexer;
 use lexer::{Lexer, Token};
 
-pub fn parse<'a>(mut lexer: Lexer, logger: &'a Logger<'a>) -> ast::Program {
+pub fn parse<'a>(lexer: Lexer, logger: &'a Logger<'a>) -> ast::Program {
     let mut tokens: Vec<lexer::Token> = lexer.collect();
     let end_token = lexer::Token {
         value: lexer::Eof,
@@ -894,7 +894,7 @@ impl<'a> Parser<'a> {
         loop {
             match self.next_token() {
                 lexer::LitString(ref string) => {
-                    code.push_str(string.as_slice());
+                    code.push_str(&string);
                 },
                 lexer::RightBrace => {
                     code.pop();

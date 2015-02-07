@@ -13,7 +13,7 @@ pub enum Value {
     Unknown(LabelId),
 }
 
-impl fmt::String for Value {
+impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             &Const(val) => write!(f, "{}", val),
@@ -192,24 +192,24 @@ impl Instruction {
             Label(name) => name,
             AllocateBytes(values) => {
                 let mut base = ".byte   ".to_string();
-                for &value in values.iter() {
-                    base.push_str((format!("{},", value)).as_slice());
+                for &value in &values {
+                    base.push_str(&format!("{},", value));
                 }
                 base.pop();
                 base
             },
             AllocateHalfWords(values) => {
                 let mut base = ".half   ".to_string();
-                for &value in values.iter() {
-                    base.push_str((format!("{},", value)).as_slice());
+                for &value in &values {
+                    base.push_str(&format!("{},", value));
                 }
                 base.pop();
                 base
             },
             AllocateWords(values) => {
                 let mut base = ".word   ".to_string();
-                for &value in values.iter() {
-                    base.push_str((format!("{},", value)).as_slice());
+                for &value in &values {
+                    base.push_str(&format!("{},", value));
                 }
                 base.pop();
                 base

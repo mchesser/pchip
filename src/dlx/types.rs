@@ -38,13 +38,13 @@ impl PartialEq for CompositeType {
     }
 }
 
-impl fmt::Show for CompositeType {
+impl fmt::Debug for CompositeType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.name)
     }
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub enum BaseType {
     Bool,
     Int,
@@ -68,7 +68,7 @@ impl BaseType {
 }
 
 /// A resolved type
-#[derive(Show, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Normal(TypeId),
     StaticArray(Box<Type>, u16),
@@ -80,8 +80,8 @@ pub enum Type {
 impl Type {
     pub fn deref(&self) -> &Type {
         match *self {
-            StaticArray(ref inner, _) => &**inner,
-            Pointer(ref inner) => &**inner,
+            StaticArray(ref inner, _) => &inner,
+            Pointer(ref inner) => &inner,
             ref invalid => panic!("ICE: Attempted to dereference `{:?}`", invalid),
         }
     }
@@ -96,12 +96,12 @@ impl TypeTable {
     pub fn resolve_type(&self, scope: &codegen::Scope, ast_type: &ast::Type) -> Type {
         match *ast_type {
             ast::VariableType(ref name) => scope.get_ident(name, InputSpan::invalid()).rtype(),
-            ast::Pointer(ref inner) => Pointer(box self.resolve_type(scope, &**inner)),
+            ast::Pointer(ref inner) => Pointer(box self.resolve_type(scope, &inner)),
             ast::StaticArrayType(ref inner, size) => {
-                StaticArray(box self.resolve_type(scope, &**inner), size as u16)
+                StaticArray(box self.resolve_type(scope, &inner), size as u16)
             },
             ast::DerefType(ref inner) => {
-                match self.resolve_type(scope, &**inner) {
+                match self.resolve_type(scope, &inner) {
                     Pointer(inner) => {
                         *inner.clone()
                     },
@@ -114,7 +114,7 @@ impl TypeTable {
                 }
             },
             ast::FieldRefType(ref inner, ref field_name) => {
-                let inner_type = self.resolve_type(scope, &**inner);
+                let inner_type = self.resolve_type(scope, &inner);
                 match *self.base_type(&inner_type) {
                     Composite(ref target_type) => {
                         (target_type.fields[field_name.clone()].1).clone()
@@ -133,7 +133,7 @@ impl TypeTable {
     pub fn base_type(&self, type_: &Type) -> &BaseType {
         match *type_ {
             Normal(id) => &self.types[id],
-            Pointer(ref inner) => self.base_type(&**inner),
+            Pointer(ref inner) => self.base_type(&inner),
             ref invalid => panic!("There is no base type associated with {:?}", invalid),
         }
     }
@@ -145,7 +145,7 @@ impl TypeTable {
     pub fn unaligned_size_of(&self, type_: &Type) -> u16 {
         match *type_ {
             Normal(id) => self.types[id].size(),
-            StaticArray(ref inner, size) => self.unaligned_size_of(&**inner) * size,
+            StaticArray(ref inner, size) => self.unaligned_size_of(&inner) * size,
             Pointer(..) => 4,
             Bottom => panic!("ICE: Attempted to determine size of bottom type"),
             Any => panic!("ICE: Attempted to determine size of any type"),
@@ -180,7 +180,7 @@ impl<'a> TypeGenData<'a> {
     fn generate_type_table(mut self, struct_list: Vec<String>) -> TypeTable {
         // Iterate through the list of remaining types an resolve them. Some types depend on other
         // types, so we recursively resolve dependencies.
-        for current_type in struct_list.iter() {
+        for current_type in &struct_list {
             let (id, struct_decl) = match self.unresolved_map.get(current_type) {
                 // This type is in still in unresolved list so we need to resolve it
                 Some(&(id, ref struct_decl)) => {
@@ -203,7 +203,7 @@ impl<'a> TypeGenData<'a> {
         let mut new_type = CompositeType::blank_type(struct_decl.name.clone());
         let mut next_offset = 0;
         // Loop though all the fields of the struct and resolve their types and offsets
-        for &(ref field_name, ref field_type) in struct_decl.fields.iter() {
+        for &(ref field_name, ref field_type) in &struct_decl.fields {
             let resolved_type = self.gen_type(field_type);
 
             let field_offset = next_offset;
@@ -239,7 +239,7 @@ impl<'a> TypeGenData<'a> {
         match *ast_type {
             // If this type is a pointer, we don't care if it hasn't been defined yet
             ast::Pointer(ref inner) => {
-                Pointer(box self.type_table.resolve_type(&self.fake_scope, &**inner))
+                Pointer(box self.type_table.resolve_type(&self.fake_scope, &inner))
             },
 
             // If the type is a user defined type, then it must be fully resolved before we can
@@ -247,7 +247,7 @@ impl<'a> TypeGenData<'a> {
             ast::UserType(ref name) => self.full_resolve_type(name),
 
             ast::StaticArrayType(ref inner, size) => {
-                StaticArray(box self.gen_type(&**inner), size as u16)
+                StaticArray(box self.gen_type(&inner), size as u16)
             },
 
             // Primitive types should already be resolved
@@ -281,7 +281,7 @@ pub fn typegen(program: &ast::Program) -> TypeTable {
 
     let mut struct_list = vec![];
 
-    for item in program.items.iter() {
+    for item in &program.items {
         match *item {
             ast::StructItem(ref struct_item) => {
                 let name = struct_item.name.clone();
