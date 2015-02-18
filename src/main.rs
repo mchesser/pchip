@@ -1,4 +1,4 @@
-#![feature(box_syntax, core, io, path, hash, collections, os, env, std_misc)]
+#![feature(box_syntax, core, io, path, hash, collections, env, std_misc)]
 
 use std::old_io::File;
 
@@ -17,7 +17,7 @@ mod ast;
 mod error;
 
 fn main() {
-    let args: Vec<_> = std::env::args().map(|s| s.into_string().unwrap()).collect();
+    let args: Vec<_> = std::env::args().collect();
     if args.len() != 2 {
         println!("Invalid usage");
         return;
