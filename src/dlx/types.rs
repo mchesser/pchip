@@ -5,7 +5,6 @@ use ast;
 use dlx::codegen;
 use error::InputSpan;
 
-pub use self::CompositeType::*;
 pub use self::BaseType::*;
 pub use self::Type::*;
 
