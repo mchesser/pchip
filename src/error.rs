@@ -1,4 +1,3 @@
-use std::iter::range_inclusive;
 use std::fmt;
 
 #[derive(Debug, Copy, Clone)]
@@ -62,7 +61,7 @@ impl<'a> Logger<'a> {
             input_span.end.line, input_span.end.col, message);
 
         if self.print_span {
-            for i in range_inclusive(input_span.start.line, input_span.end.line) {
+            for i in (input_span.start.line..input_span.end.line+1) {
                 println!("{}", self.lines[i-1]);
             }
             println!("");

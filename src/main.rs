@@ -1,6 +1,7 @@
-#![feature(box_syntax, core, io, path, hash, collections, env, std_misc)]
+#![feature(box_syntax, str_char)]
 
-use std::old_io::File;
+use std::io::Read;
+use std::fs::File;
 
 use std::cmp::min;
 use std::iter;
@@ -22,14 +23,14 @@ fn main() {
         println!("Invalid usage");
         return;
     }
-    let mut file = match File::open(&Path::new(args[1].clone())) {
+    let mut file = match File::open(args[1].clone()) {
         Ok(f) => f,
         Err(e) => panic!("Error opening file: {}", e)
     };
-    let input = match file.read_to_string() {
-        Ok(input) => input,
-        Err(e)  => panic!("Error reading file: {}", e)
-    };
+    let mut input = String::new();;
+    if let Err(e) = file.read_to_string(&mut input) {
+        panic!("Error reading file: {}", e);
+    }
 
     let logger = Logger::new(&input, true);
     let program = parse(Lexer::new(&input), &logger);

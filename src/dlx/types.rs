@@ -116,7 +116,7 @@ impl TypeTable {
                 let inner_type = self.resolve_type(scope, &inner);
                 match *self.base_type(&inner_type) {
                     Composite(ref target_type) => {
-                        (target_type.fields[field_name.clone()].1).clone()
+                        (target_type.fields[field_name].1).clone()
                     },
                     ref invalid => panic!("type `{:?}` has no field `{:?}`", invalid, field_name),
                 }
@@ -125,7 +125,7 @@ impl TypeTable {
             ast::Primitive(ast::AnyType) => Any,
 
             // Otherwise this is a normal variable
-            _ => Normal(self.type_map[ast_type.clone()]),
+            _ => Normal(self.type_map[ast_type]),
         }
     }
 

@@ -1049,8 +1049,6 @@ impl<'a> CodeData<'a> {
     }
 
     fn multiply_by(&mut self, num: usize) {
-        use std::num::Float;
-
         // Check if it is a power of 2
         // TODO: Generate extra code for multiplications that are not a power of 2
         if !(num & (num - 1) == 0) {

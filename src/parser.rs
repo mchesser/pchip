@@ -422,7 +422,7 @@ impl<'a> Parser<'a> {
                 }
             },
             lexer::LitString(value) => {
-                let escape_HACK = value.as_slice().chars().filter(|&x| x == '\\').count() as i32;
+                let escape_HACK = value.chars().filter(|&x| x == '\\').count() as i32;
                 let len = value.len() as i32 - escape_HACK;
                 ast::Expression {
                     expr: box ast::LitStringExpr(value),
