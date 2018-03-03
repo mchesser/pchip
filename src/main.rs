@@ -1,4 +1,4 @@
-#![feature(box_syntax, str_char)]
+#![feature(box_syntax)]
 
 use std::io::Read;
 use std::fs::File;

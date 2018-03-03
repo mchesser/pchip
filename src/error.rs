@@ -61,8 +61,8 @@ impl<'a> Logger<'a> {
             input_span.end.line, input_span.end.col, message);
 
         if self.print_span {
-            for i in (input_span.start.line..input_span.end.line+1) {
-                println!("{}", self.lines[i-1]);
+            for i in input_span.start.line..(input_span.end.line + 1) {
+                println!("{}", self.lines[i - 1]);
             }
             println!("");
         }

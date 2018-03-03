@@ -1,5 +1,5 @@
 ### Adventure game - Michael Chesser 2014
-### Written in pchip (https://github.com/quvarxa/pchip), my programming language for DLX
+### Written in pchip (https://github.com/mchesser/pchip), my programming language for DLX
 
 ##
 ## Core operations
@@ -414,13 +414,13 @@ fn hook(from: *char, to: *char, dir: char) {
         str_put(&MSG_DOES_NOT_EXIST[0]);
         return;
     }
-    
+
     let to_node_ptr = get_node(to);
     if (equal(to_node_ptr as int, null as int)) {
         str_put(&MSG_DOES_NOT_EXIST[0]);
         return;
     }
-    
+
     let from_node = *from_node_ptr;
     let to_node = *to_node_ptr;
 
@@ -455,7 +455,7 @@ fn unhook(from: *char, dir: char) {
         str_put(&MSG_DOES_NOT_EXIST[0]);
         return;
     }
-    
+
     let from_node = *from_node_ptr;
 
     if (equal(dir as int, 'N' as int)) {

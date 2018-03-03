@@ -1,7 +1,6 @@
 use ast;
 use error::{InputPos, InputSpan, Logger};
-use lexer;
-use lexer::{Lexer, Token};
+use lexer::{self, Lexer};
 
 pub fn parse<'a>(lexer: Lexer, logger: &'a Logger<'a>) -> ast::Program {
     let mut tokens: Vec<lexer::Token> = lexer.collect();

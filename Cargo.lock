@@ -1,4 +1,4 @@
-[root]
+[[package]]
 name = "pchip"
 version = "0.0.1"
 

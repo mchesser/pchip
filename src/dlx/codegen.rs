@@ -61,7 +61,7 @@ prgsrt  addui   r14,r0,stack            ; Give the program a stack
 ";
 
 
-struct Function {
+pub struct Function {
     ast: ast::FunctionDeclaration,
     arg_types: Vec<Type>,
     rtype: Type,
@@ -91,7 +91,7 @@ enum Location {
     Register(RegId),
 }
 
-struct Variable {
+pub struct Variable {
     ast: ast::LetStatement,
     rtype: Type,
     is_const: bool,
@@ -110,12 +110,12 @@ impl Variable {
 }
 
 #[derive(PartialEq, Hash)]
-enum IdentId {
+pub enum IdentId {
     FnIdentId(usize),
     VarIdentId(usize),
 }
 
-enum Ident<'a> {
+pub enum Ident<'a> {
     FnIdent(&'a Function),
     VarIdent(&'a Variable),
 }
@@ -238,7 +238,7 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start
 
     data.instructions.push(asm::RawAsm(DATA_SEGMENT.to_string()));
     // Compile global variables
-    for i in (0..global.vars.len()) {
+    for i in 0..global.vars.len() {
         data.compile_global_var(&global, i);
     }
 
@@ -249,7 +249,7 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start
         data.instructions.push(asm::RawAsm(CODE_SEGMENT.to_string()));
     }
     // Compile global functions
-    for i in (0..global.functions.len()) {
+    for i in 0..global.functions.len() {
         data.compile_global_fn(&global, i);
     }
 
@@ -373,7 +373,7 @@ impl<'a> CodeData<'a> {
         // Register function parameters as local variables
         // The input params are stored in negative offset before the frame pointer with the last
         // param stored at FRAME_POINTER[-1]
-        let mut next_param_addr = 0;
+        let mut next_param_addr = 0_i32;
         for &(ref name, ref var_type) in scope.functions[fn_id].ast.params.iter().rev() {
             let var_ast = ast::LetStatement {
                 name: name.clone(),
@@ -383,7 +383,7 @@ impl<'a> CodeData<'a> {
                 span: span.clone(),
             };
             let rtype = self.resolve_type(scope, &var_ast.var_type);
-            next_param_addr -= self.size_of(&rtype);
+            next_param_addr -= self.size_of(&rtype) as i32;
             let var = Variable::new(var_ast, rtype, Offset(next_param_addr as i16), false);
 
             let id = VarIdentId(local.vars.len());
@@ -498,34 +498,25 @@ impl<'a> CodeData<'a> {
                 // Convert the string into a byte array
                 // FIXME: this should happen in the lexer/parser
                 let mut bytes = vec![];
-                let mut str_slice: &str = &inner;
-                loop {
-                    let c = match str_slice.slice_shift_char() {
-                        // Escape chars
-                        Some(('\\', rest)) => {
-                            match rest.slice_shift_char() {
-                                Some(('n', rest)) => {
-                                    str_slice = rest;
-                                    '\n'
-                                },
-                                Some(('0', rest)) => {
-                                    str_slice = rest;
-                                    '\0'
-                                },
-                                Some((invalid, _)) => panic!("Invalid escape char: {}", invalid),
-                                None => panic!("ICE, end of string was escaped"),
-                            }
-                        },
-                        // Normal chars
-                        Some((other, rest)) => {
-                            str_slice = rest;
-                            other
-                        },
-                        None => break,
-                    };
+
+                // The remaining characters left to parse in this expression
+                let mut rem: &str = &inner;
+
+                while let Some(mut next) = rem.chars().next() {
+                    rem = &rem[next.len_utf8()..];
+                    if next == '\\' {
+                        let escaped = rem.chars().next().expect("ICE, end of string was escaped");
+                        rem = &rem[escaped.len_utf8()..];
+
+                        match escaped {
+                            'n' => next = '\n',
+                            '0' => next = '\0',
+                            invalid => panic!("Invalid escape char: {}", invalid),
+                        }
+                    }
 
                     let expression = ast::Expression {
-                        expr: box ast::LitCharExpr(c),
+                        expr: box ast::LitCharExpr(next),
                         rtype: ast::Primitive(ast::CharType),
                         span: span.clone(),
                     };
@@ -574,7 +565,7 @@ impl<'a> CodeData<'a> {
                 match inner.fields.get(field) {
                     Some(&(offset, ref type_)) => (offset, type_.clone()),
                     None => {
-                        self.logger.report_error(format!("type `{:?}` has no field {:?}", 
+                        self.logger.report_error(format!("type `{:?}` has no field {:?}",
                             target_type, field), span);
                         self.fatal_error();
                     }
@@ -954,7 +945,7 @@ impl<'a> CodeData<'a> {
                 // NOTE: types *must* be word aligned
                 let num_words = (self.size_of(other) / 4) as i16;
                 // Perform a load and store for each of the words
-                for i in (0..num_words) {
+                for i in 0..num_words {
                     self.instructions.push(asm::Load32(COPY_REG, asm::Const(i * 4), from));
                     self.instructions.push(asm::Store32(asm::Const(i * 4), to, COPY_REG));
                 }

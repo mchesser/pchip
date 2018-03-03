@@ -80,30 +80,27 @@ impl<'a> Lexer<'a> {
     }
 
     fn bump(&mut self) {
-        match self.remaining.slice_shift_char() {
-            // Move to the next line
-            Some(('\n', rest)) => {
-                self.pos.line += 1;
-                self.pos.col = 0;
-                self.remaining = rest;
-            },
+        if let Some(next) = self.remaining.chars().next() {
+            match next {
+                // Move to the next line
+                '\n' => {
+                    self.pos.line += 1;
+                    self.pos.col = 0;
+                },
 
-            // Discard carrage return characters
-            Some(('\r', rest)) => self.remaining = rest,
+                // Discard carrage return characters
+                '\r' => {},
 
-            // For other characters increase the column position
-            Some((_, rest)) => {
-                self.pos.col += 1;
-                self.remaining = rest;
+                // For other characters increase the column position
+                _ => self.pos.col += 1,
             }
-
-            None => {},
+            self.remaining = &self.remaining[next.len_utf8()..];
         }
     }
 
     fn read_white_space_or_comment(&mut self) {
-        while self.remaining.len() > 0 {
-            match self.remaining.char_at(0) {
+        while let Some(next) = self.remaining.chars().next() {
+            match next {
                 // Match whitespace
                 c if c.is_whitespace() => self.bump(),
 
@@ -135,7 +132,7 @@ impl<'a> Iterator for Lexer<'a> {
         }
 
         let mut token_len = 1;
-        let token_val = match self.remaining.char_at(0) {
+        let token_val = match self.remaining.chars().next().unwrap() {
             '(' => LeftParen,
             ')' => RightParen,
 
@@ -153,33 +150,36 @@ impl<'a> Iterator for Lexer<'a> {
             '&' => Amp,
 
             '=' => {
-                if len == 1 { Assignment }
-                else {
-                    match self.remaining.char_at(1) {
-                        '=' => { token_len += 1; Equal },
-                        _ => Assignment
-                    }
+                match self.remaining.chars().nth(1) {
+                    Some('=') => {
+                        token_len += 1;
+                        Equal
+                    },
+                    _ => Assignment,
                 }
             },
 
             '+' => {
-                if len == 1 { Plus }
-                else {
-                    match self.remaining.char_at(1) {
-                        '=' => { token_len += 1; PlusEq },
-                        _ => Plus
-                    }
+                match self.remaining.chars().nth(1) {
+                    Some('=') => {
+                        token_len += 1;
+                        PlusEq
+                    },
+                    _ => Plus,
                 }
             },
 
             '-' => {
-                if len == 1 { Minus }
-                else {
-                    match self.remaining.char_at(1) {
-                        '=' => { token_len += 1; MinusEq },
-                        '>' => { token_len += 1; RightArrow },
-                        _ => Minus
-                    }
+                match self.remaining.chars().nth(1) {
+                    Some('=') => {
+                        token_len += 1;
+                        MinusEq
+                    },
+                    Some('>') => {
+                        token_len += 1;
+                        RightArrow
+                    },
+                    _ => Minus,
                 }
             },
 
@@ -210,9 +210,9 @@ impl<'a> Iterator for Lexer<'a> {
                     panic!("Invalid char literal");
                 }
                 self.bump();
-                let result = LitChar(self.remaining.char_at(0));
+                let result = LitChar(self.remaining.chars().next().unwrap());
                 self.bump();
-                if self.remaining.char_at(0) != '\'' {
+                if self.remaining.chars().next().unwrap() != '\'' {
                     panic!("Unclosed '");
                 }
                 result
