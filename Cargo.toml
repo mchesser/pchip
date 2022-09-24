@@ -2,7 +2,4 @@
 name = "pchip"
 version = "0.0.1"
 authors = ["Michael Chesser"]
-
-[[bin]]
-name = "pchip"
-path = "src/main.rs"
+edition = "2021"

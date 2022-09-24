@@ -4,20 +4,20 @@ pub use self::Value::*;
 use std::fmt;
 
 pub type RegId = usize;
-pub type SpecialRegId = usize;
-pub type TrapId = usize;
+pub type _SpecialRegId = usize;
+pub type _TrapId = usize;
 pub type LabelId = String;
 
 pub enum Value {
     Const(i16),
-    Unknown(LabelId),
+    _Unknown(LabelId),
 }
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            &Const(val) => write!(f, "{}", val),
-            &Unknown(ref label) => write!(f, "{}", label.clone()),
+            Const(val) => write!(f, "{}", val),
+            _Unknown(ref label) => write!(f, "{}", label.clone()),
         }
     }
 }
@@ -123,102 +123,102 @@ pub enum Instruction {
     RawAsm(String),
 }
 
-impl Instruction {
-    pub fn to_string(self) -> String {
+impl std::fmt::Display for Instruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Load8(j, s, i)   => format!("lb      r{},{}(r{})", j, s, i),
-            Load8u(j, s, i)  => format!("lbu     r{},{}(r{})", j, s, i),
-            Load16(j, s, i)  => format!("lh      r{},{}(r{})", j, s, i),
-            Load16u(j, s, i) => format!("lhu     r{},{}(r{})", j, s, i),
-            Load32(j, s, i)  => format!("lw      r{},{}(r{})", j, s, i),
-            Store8(s, i, j)  => format!("sb      {}(r{}),r{}", s, i, j),
-            Store16(s, i, j) => format!("sh      {}(r{}),r{}", s, i, j),
-            Store32(s, i, j) => format!("sw      {}(r{}),r{}", s, i, j),
+            Load8(j, s, i) => write!(f, "lb      r{},{}(r{})", j, s, i),
+            Load8u(j, s, i) => write!(f, "lbu     r{},{}(r{})", j, s, i),
+            Load16(j, s, i) => write!(f, "lh      r{},{}(r{})", j, s, i),
+            Load16u(j, s, i) => write!(f, "lhu     r{},{}(r{})", j, s, i),
+            Load32(j, s, i) => write!(f, "lw      r{},{}(r{})", j, s, i),
+            Store8(s, i, j) => write!(f, "sb      {}(r{}),r{}", s, i, j),
+            Store16(s, i, j) => write!(f, "sh      {}(r{}),r{}", s, i, j),
+            Store32(s, i, j) => write!(f, "sw      {}(r{}),r{}", s, i, j),
 
-            JumpIfZero(i, label)    => format!("beqz    r{},{}", i, label),
-            JumpIfNotZero(i, label) => format!("bnez    r{},{}", i, label),
-            Jump(label)             => format!("j       {}", label),
-            JumpStore(label)        => format!("jal     {}", label),
-            JumpStoreR(i)           => format!("jalr    r{}", i),
-            JumpR(i)                => format!("jr      r{}", i),
+            JumpIfZero(i, label) => write!(f, "beqz    r{},{}", i, label),
+            JumpIfNotZero(i, label) => write!(f, "bnez    r{},{}", i, label),
+            Jump(label) => write!(f, "j       {}", label),
+            JumpStore(label) => write!(f, "jal     {}", label),
+            JumpStoreR(i) => write!(f, "jalr    r{}", i),
+            JumpR(i) => write!(f, "jr      r{}", i),
 
-            LoadHighImmediate(j, u)   => format!("lhi     r{},{}", j, u),
-            AddSigned(k, i, j)        => format!("add     r{},r{},r{}", k, i, j),
-            AddSignedValue(j, i, s)   => format!("addi    r{},r{},{}", j, i, s),
-            AddUnsigned(k, i, j)      => format!("addu    r{},r{},r{}", k, i, j),
-            AddUnsignedValue(j, i, u) => format!("addui   r{},r{},{}", j, i, u),
-            SubSigned(k, i, j)        => format!("sub     r{},r{},r{}", k, i, j),
-            SubSignedValue(j, i, s)   => format!("subi    r{},r{},{}", j, i, s),
-            SubUnsigned(k, i, j)      => format!("subu    r{},r{},r{}", k, i, j),
-            SubUnsignedValue(j, i, u) => format!("subui   r{},r{},{}", j, i, u),
+            LoadHighImmediate(j, u) => write!(f, "lhi     r{},{}", j, u),
+            AddSigned(k, i, j) => write!(f, "add     r{},r{},r{}", k, i, j),
+            AddSignedValue(j, i, s) => write!(f, "addi    r{},r{},{}", j, i, s),
+            AddUnsigned(k, i, j) => write!(f, "addu    r{},r{},r{}", k, i, j),
+            AddUnsignedValue(j, i, u) => write!(f, "addui   r{},r{},{}", j, i, u),
+            SubSigned(k, i, j) => write!(f, "sub     r{},r{},r{}", k, i, j),
+            SubSignedValue(j, i, s) => write!(f, "subi    r{},r{},{}", j, i, s),
+            SubUnsigned(k, i, j) => write!(f, "subu    r{},r{},r{}", k, i, j),
+            SubUnsignedValue(j, i, u) => write!(f, "subui   r{},r{},{}", j, i, u),
 
-            SetEq(k, i, j)                 => format!("seq     r{},r{},r{}", k, i, j),
-            SetEqSignedValue(j, i, s)      => format!("seqi    r{},r{},{}", j, i, s),
-            SetEqUnsigned(k, i, j)         => format!("sequ    r{},r{},r{}", k, i, j),
-            SetEqUnsignedValue(j, i, u)    => format!("sequi   r{},r{},{}", j, i, u),
-            SetNotEq(k, i, j)              => format!("sne     r{},r{},r{}", k, i, j),
-            SetNotEqSignedValue(j, i, s)   => format!("snei    r{},r{},{}", j, i, s),
-            SetNotEqUnsigned(k, i, j)      => format!("sneu    r{},r{},r{}", k, i, j),
-            SetNotEqUnsignedValue(j, i, u) => format!("sneui   r{},r{},{}", j, i, u),
-            SetGt(k, i, j)                 => format!("sgt     r{},r{},r{}", k, i, j),
-            SetGtSignedValue(j, i, s)      => format!("sgti    r{},r{},{}", j, i, s),
-            SetGtUnsigned(k, i, j)         => format!("sgtu    r{},r{},r{}", k, i, j),
-            SetGtUnsignedValue(j, i, u)    => format!("sgtui   r{},r{},{}", j, i, u),
-            SetGtEq(k, i, j)               => format!("sge     r{},r{},r{}", k, i, j),
-            SetGtEqSignedValue(j, i, s)    => format!("sgei    r{},r{},{}", j, i, s),
-            SetGtEqUnsigned(k, i, j)       => format!("sgeu    r{},r{},r{}", k, i, j),
-            SetGtEqUnsignedValue(j, i, u)  => format!("sgeui   r{},r{},{}", j, i, u),
-            SetLt(k, i, j)                 => format!("slt     r{},r{},r{}", k, i, j),
-            SetLtSignedValue(j, i, s)      => format!("slti    r{},r{},{}", j, i, s),
-            SetLtUnsigned(k, i, j)         => format!("sltu    r{},r{},r{}", k, i, j),
-            SetLtUnsignedValue(j, i, u)    => format!("sltui   r{},r{},{}", j, i, u),
-            SetLtEq(k, i, j)               => format!("sle     r{},r{},r{}", k, i, j),
-            SetLtEqSignedValue(j, i, s)    => format!("slei    r{},r{},{}", j, i, s),
-            SetLtEqUnsigned(k, i, j)       => format!("sleu    r{},r{},r{}", k, i, j),
-            SetLtEqUnsignedValue(j, i, u)  => format!("sleui   r{},r{},{}", j, i, u),
+            SetEq(k, i, j) => write!(f, "seq     r{},r{},r{}", k, i, j),
+            SetEqSignedValue(j, i, s) => write!(f, "seqi    r{},r{},{}", j, i, s),
+            SetEqUnsigned(k, i, j) => write!(f, "sequ    r{},r{},r{}", k, i, j),
+            SetEqUnsignedValue(j, i, u) => write!(f, "sequi   r{},r{},{}", j, i, u),
+            SetNotEq(k, i, j) => write!(f, "sne     r{},r{},r{}", k, i, j),
+            SetNotEqSignedValue(j, i, s) => write!(f, "snei    r{},r{},{}", j, i, s),
+            SetNotEqUnsigned(k, i, j) => write!(f, "sneu    r{},r{},r{}", k, i, j),
+            SetNotEqUnsignedValue(j, i, u) => write!(f, "sneui   r{},r{},{}", j, i, u),
+            SetGt(k, i, j) => write!(f, "sgt     r{},r{},r{}", k, i, j),
+            SetGtSignedValue(j, i, s) => write!(f, "sgti    r{},r{},{}", j, i, s),
+            SetGtUnsigned(k, i, j) => write!(f, "sgtu    r{},r{},r{}", k, i, j),
+            SetGtUnsignedValue(j, i, u) => write!(f, "sgtui   r{},r{},{}", j, i, u),
+            SetGtEq(k, i, j) => write!(f, "sge     r{},r{},r{}", k, i, j),
+            SetGtEqSignedValue(j, i, s) => write!(f, "sgei    r{},r{},{}", j, i, s),
+            SetGtEqUnsigned(k, i, j) => write!(f, "sgeu    r{},r{},r{}", k, i, j),
+            SetGtEqUnsignedValue(j, i, u) => write!(f, "sgeui   r{},r{},{}", j, i, u),
+            SetLt(k, i, j) => write!(f, "slt     r{},r{},r{}", k, i, j),
+            SetLtSignedValue(j, i, s) => write!(f, "slti    r{},r{},{}", j, i, s),
+            SetLtUnsigned(k, i, j) => write!(f, "sltu    r{},r{},r{}", k, i, j),
+            SetLtUnsignedValue(j, i, u) => write!(f, "sltui   r{},r{},{}", j, i, u),
+            SetLtEq(k, i, j) => write!(f, "sle     r{},r{},r{}", k, i, j),
+            SetLtEqSignedValue(j, i, s) => write!(f, "slei    r{},r{},{}", j, i, s),
+            SetLtEqUnsigned(k, i, j) => write!(f, "sleu    r{},r{},r{}", k, i, j),
+            SetLtEqUnsignedValue(j, i, u) => write!(f, "sleui   r{},r{},{}", j, i, u),
 
-            And(k, i, j)      => format!("and     r{},r{},r{}", k, i, j),
-            AndValue(j, i, u) => format!("andi    r{},r{},{}", j, i, u),
-            Or(k, i, j)       => format!("or      r{},r{},r{}", k, i, j),
-            OrValue(j, i, u)  => format!("ori     r{},r{},{}", j, i, u),
-            Xor(k, i, j)      => format!("xor     r{},r{},r{}", k, i, j),
-            XorValue(j, i, u) => format!("xori    r{},r{},{}", j, i, u),
+            And(k, i, j) => write!(f, "and     r{},r{},r{}", k, i, j),
+            AndValue(j, i, u) => write!(f, "andi    r{},r{},{}", j, i, u),
+            Or(k, i, j) => write!(f, "or      r{},r{},r{}", k, i, j),
+            OrValue(j, i, u) => write!(f, "ori     r{},r{},{}", j, i, u),
+            Xor(k, i, j) => write!(f, "xor     r{},r{},r{}", k, i, j),
+            XorValue(j, i, u) => write!(f, "xori    r{},r{},{}", j, i, u),
 
-            LShiftValue(j, i, u) => format!("slli    r{},r{},{}", j, i, u),
+            LShiftValue(j, i, u) => write!(f, "slli    r{},r{},{}", j, i, u),
 
-            Halt => format!("halt"),
-            Nop => format!("nop"),
+            Halt => f.write_str("halt"),
+            Nop => f.write_str("nop"),
 
-            Label(name) => name,
+            Label(name) => f.write_str(name),
             AllocateBytes(values) => {
                 let mut base = ".byte   ".to_string();
-                for &value in &values {
+                for &value in values {
                     base.push_str(&format!("{},", value));
                 }
                 base.pop();
-                base
-            },
+                f.write_str(&base)
+            }
             AllocateHalfWords(values) => {
                 let mut base = ".half   ".to_string();
-                for &value in &values {
+                for &value in values {
                     base.push_str(&format!("{},", value));
                 }
                 base.pop();
-                base
-            },
+                f.write_str(&base)
+            }
             AllocateWords(values) => {
                 let mut base = ".word   ".to_string();
-                for &value in &values {
+                for &value in values {
                     base.push_str(&format!("{},", value));
                 }
                 base.pop();
-                base
-            },
-            AllocateSpace(amount) => format!(".space  {}", amount),
-            AllocateAscii(value) => format!(".ascii  \"{}\"", value),
-            Align(value) => format!(".align  {}", value),
+                f.write_str(&base)
+            }
+            AllocateSpace(amount) => write!(f, "   .space  {}", amount),
+            AllocateAscii(value) => write!(f, "   .ascii  \"{}\"", value),
+            Align(value) => write!(f, "   .align  {}", value),
 
-            RawAsm(ref data) => data.clone(),
+            RawAsm(data) => f.write_str(data),
         }
     }
 }

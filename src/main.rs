@@ -1,21 +1,12 @@
-#![feature(box_syntax)]
+use std::{cmp::min, fs::File, io::Read, iter};
 
-use std::io::Read;
-use std::fs::File;
+use crate::{dlx::codegen::codegen, error::Logger, lexer::Lexer, parser::parse};
 
-use std::cmp::min;
-use std::iter;
-
-use parser::parse;
-use lexer::Lexer;
-use error::Logger;
-use dlx::codegen::codegen;
-
-mod parser;
-mod dlx;
-mod lexer;
 mod ast;
+mod dlx;
 mod error;
+mod lexer;
+mod parser;
 
 fn main() {
     let args: Vec<_> = std::env::args().collect();
@@ -25,9 +16,9 @@ fn main() {
     }
     let mut file = match File::open(args[1].clone()) {
         Ok(f) => f,
-        Err(e) => panic!("Error opening file: {}", e)
+        Err(e) => panic!("Error opening file: {}", e),
     };
-    let mut input = String::new();;
+    let mut input = String::new();
     if let Err(e) = file.read_to_string(&mut input) {
         panic!("Error reading file: {}", e);
     }
@@ -47,7 +38,7 @@ fn main() {
                 }
                 program_string.push_str(&label);
                 space += label.len();
-            },
+            }
             dlx::asm::RawAsm(data) => {
                 if space != 0 {
                     program_string.push('\n');
@@ -55,7 +46,7 @@ fn main() {
                 }
                 program_string.push_str(&data);
                 program_string.push('\n');
-            },
+            }
             other => {
                 let data = other.to_string();
                 program_string.extend(iter::repeat(' ').take(8 - min(7, space)));

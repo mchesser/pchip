@@ -1,19 +1,16 @@
-use std::collections::HashMap;
-use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::collections::{
+    hash_map::Entry::{Occupied, Vacant},
+    HashMap,
+};
 
-use ast;
+use crate::{
+    ast,
+    dlx::asm::{self, Instruction, LabelId, RegId},
+    dlx::types::{self, Type, TypeTable},
+    error::{InputSpan, Logger},
+};
 
-use dlx::asm;
-use dlx::asm::{RegId, LabelId};
-use dlx::asm::Instruction;
-use dlx::types;
-use dlx::types::{Type, TypeTable};
-
-use error::{InputSpan, Logger};
-
-use self::IdentId::*;
-use self::Location::*;
-use self::Ident::*;
+use self::{Ident::*, IdentId::*, Location::*};
 
 const UNIT_TYPE: Type = types::Normal(0);
 const INT_TYPE: Type = types::Normal(1);
@@ -27,7 +24,7 @@ const FRAME_POINTER: RegId = 30;
 // Stack pointer register
 const STACK_POINTER: RegId = 14;
 // Heap pointer register
-const HEAP_POINTER: RegId = 15;
+const _HEAP_POINTER: RegId = 15;
 // Return address register (set by jal)
 const RETURN_REG: RegId = 31;
 // Register used for storing the results of computations
@@ -39,12 +36,11 @@ const ADDR_REG: RegId = 3;
 // Register use for copying values
 const COPY_REG: RegId = 4;
 
-const DATA_SEGMENT: &'static str = "        .seg    data";
-const CONST_DATA_SEGMENT: &'static str = "        .seg    constdata";
-const CODE_SEGMENT: &'static str = "        .seg    code";
+const DATA_SEGMENT: &str = "        .seg    data";
+const CONST_DATA_SEGMENT: &str = "        .seg    constdata";
+const CODE_SEGMENT: &str = "        .seg    code";
 
-const PROGRAM_START: &'static str =
-"
+const PROGRAM_START: &str = "
 ; Allocate some dynamic memory for the program to use
         .seg    data
 stack   .space  800
@@ -60,7 +56,6 @@ prgsrt  addui   r14,r0,stack            ; Give the program a stack
         halt                            ; Stop the machine
 ";
 
-
 pub struct Function {
     ast: ast::FunctionDeclaration,
     arg_types: Vec<Type>,
@@ -69,18 +64,15 @@ pub struct Function {
 }
 
 impl Function {
-    fn new(ast: ast::FunctionDeclaration, type_table: &TypeTable, scope: &Scope,
-        location: LabelId) -> Function
-    {
-        let arg_types = ast.params.iter().map(|p| type_table.resolve_type(scope, &p.1))
-            .collect();
+    fn new(
+        ast: ast::FunctionDeclaration,
+        type_table: &TypeTable,
+        scope: &Scope,
+        location: LabelId,
+    ) -> Function {
+        let arg_types = ast.params.iter().map(|p| type_table.resolve_type(scope, &p.1)).collect();
         let rtype = type_table.resolve_type(scope, &ast.rtype);
-        Function {
-            ast: ast,
-            arg_types: arg_types,
-            rtype: rtype,
-            location: location,
-        }
+        Function { ast, arg_types, rtype, location }
     }
 }
 
@@ -100,16 +92,11 @@ pub struct Variable {
 
 impl Variable {
     fn new(ast: ast::LetStatement, rtype: Type, location: Location, is_const: bool) -> Variable {
-        Variable {
-            ast: ast,
-            rtype: rtype,
-            is_const: is_const,
-            location: location,
-        }
+        Variable { ast, rtype, is_const, location }
     }
 }
 
-#[derive(PartialEq, Hash)]
+#[derive(Eq, PartialEq, Hash)]
 pub enum IdentId {
     FnIdentId(usize),
     VarIdentId(usize),
@@ -143,7 +130,7 @@ pub struct Scope<'a> {
     ident_table: HashMap<String, IdentId>,
     loop_ends: Vec<LabelId>,
     end_label: LabelId,
-    parent: Option<&'a Scope<'a>>
+    parent: Option<&'a Scope<'a>>,
 }
 
 impl<'a> Scope<'a> {
@@ -156,7 +143,7 @@ impl<'a> Scope<'a> {
             next_offset: 8,
             ident_table: HashMap::new(),
             loop_ends: vec![],
-            end_label: end_label,
+            end_label,
             parent: None,
         }
     }
@@ -170,7 +157,9 @@ impl<'a> Scope<'a> {
     /// Add an identifier to the scope
     fn add_ident(&mut self, ident_name: String, ident: IdentId, _span: InputSpan) {
         match self.ident_table.entry(ident_name) {
-            Vacant(entry) => { entry.insert(ident); },
+            Vacant(entry) => {
+                entry.insert(ident);
+            }
             // This identifier shadows an existing one. Variable shadowing is not supported.
             Occupied(..) => panic!("IDENT_SHADOW_ERROR, TODO: improve error message"),
         }
@@ -188,24 +177,29 @@ impl<'a> Scope<'a> {
                     None => {
                         // Reached the top level scope, but still could not find the identifier
                         // therefore it doesn't not exist at this location.
-                        panic!("IDENT_NOT_FOUND_ERROR, ({}), TODO: improve error message",
-                            ident_name);
-                    },
+
+                        panic!(
+                            "IDENT_NOT_FOUND_ERROR, ({}), TODO: improve error message {:?}",
+                            ident_name, span,
+                        );
+                    }
                 }
-            },
+            }
         }
     }
 }
 
-pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start: bool)
-    -> Vec<Instruction>
-{
+pub fn codegen<'a>(
+    program: ast::Program,
+    logger: &'a Logger<'a>,
+    add_prog_start: bool,
+) -> Vec<Instruction> {
     let mut global = Scope::new("exit".to_string());
     let mut data = CodeData {
         instructions: vec![],
         type_table: types::typegen(&program),
         label_count: 0,
-        logger: logger,
+        logger,
         add_to_address: false,
         const_mem: false,
     };
@@ -217,22 +211,22 @@ pub fn codegen<'a>(program: ast::Program, logger: &'a Logger<'a>, add_prog_start
                 let id = FnIdentId(global.functions.len());
                 let name = fn_item.name.clone();
                 let label = name.clone();
-                global.add_ident(name, id, fn_item.span.clone());
+                global.add_ident(name, id, fn_item.span);
                 let function = Function::new(fn_item, &data.type_table, &global, label);
                 global.functions.push(function);
-            },
+            }
             ast::LetItem(let_item) => {
                 let id = VarIdentId(global.vars.len());
                 let name = let_item.name.clone();
-                let label = format!("{}", name);
-                global.add_ident(name, id, let_item.span.clone());
+                let label = name.clone();
+                global.add_ident(name, id, let_item.span);
                 let rtype = data.resolve_type(&global, &let_item.var_type);
                 let is_const = let_item.is_const;
                 global.vars.push(Variable::new(let_item, rtype, Label(label), is_const));
-            },
+            }
 
             // Handled by type gen
-            ast::StructItem(..) => {},
+            ast::StructItem(..) => {}
         }
     }
 
@@ -285,8 +279,12 @@ impl<'a> CodeData<'a> {
     fn compile_global_var(&mut self, scope: &Scope, var_id: usize) {
         let is_const = scope.vars[var_id].is_const;
         if is_const != self.const_mem {
-            if is_const { self.instructions.push(asm::RawAsm(CONST_DATA_SEGMENT.to_string())); }
-            else { self.instructions.push(asm::RawAsm(DATA_SEGMENT.to_string())); }
+            if is_const {
+                self.instructions.push(asm::RawAsm(CONST_DATA_SEGMENT.to_string()));
+            }
+            else {
+                self.instructions.push(asm::RawAsm(DATA_SEGMENT.to_string()));
+            }
             self.const_mem = is_const;
         }
 
@@ -310,7 +308,7 @@ impl<'a> CodeData<'a> {
                 match *rhs_expr {
                     ast::LitNumExpr(value) => {
                         self.instructions.push(asm::AllocateWords(vec![value as i32]));
-                    },
+                    }
 
                     ast::StaticArrayExpr(ref inner) => {
                         match *inner.elements[0].expr {
@@ -324,27 +322,27 @@ impl<'a> CodeData<'a> {
                                     }
                                 }
                                 self.instructions.push(asm::AllocateWords(unwrapped));
-                            },
+                            }
                             ref invalid => {
                                 panic!("Unable to statically resolve expression: `{:?}`", invalid)
-                            },
+                            }
                         }
-                    },
+                    }
 
                     ast::LitStringExpr(ref value) => {
                         self.instructions.push(asm::AllocateAscii(value.clone()));
                         if value.len() % 4 != 0 {
                             self.instructions.push(asm::Align(2));
                         }
-                    },
+                    }
 
                     // TODO: Handle other types of static data
                     ref invalid => {
                         println!("{:?}", invalid);
                         unimplemented!();
-                    },
+                    }
                 }
-            },
+            }
             // Uninitialized variables
             None => {
                 let size = self.size_of(&rtype) as u32;
@@ -357,7 +355,7 @@ impl<'a> CodeData<'a> {
     fn compile_global_fn(&mut self, scope: &Scope, fn_id: usize) {
         // Add the functions label
         let label = scope.functions[fn_id].location.clone();
-        let span = scope.functions[fn_id].ast.span.clone();
+        let span = scope.functions[fn_id].ast.span;
         self.instructions.push(asm::Label(label));
 
         // Store caller's frame pointer and set current frame pointer
@@ -380,14 +378,14 @@ impl<'a> CodeData<'a> {
                 var_type: var_type.clone(),
                 assignment: None,
                 is_const: false,
-                span: span.clone(),
+                span,
             };
             let rtype = self.resolve_type(scope, &var_ast.var_type);
             next_param_addr -= self.size_of(&rtype) as i32;
             let var = Variable::new(var_ast, rtype, Offset(next_param_addr as i16), false);
 
             let id = VarIdentId(local.vars.len());
-            local.add_ident(name.clone(), id, span.clone());
+            local.add_ident(name.clone(), id, span);
             local.vars.push(var);
         }
 
@@ -431,11 +429,13 @@ impl<'a> CodeData<'a> {
             ast::RefExpr(ref inner) => {
                 let valid_address = self.compile_address(scope, inner);
                 if !valid_address {
-                    self.logger.report_error(format!("Cannot take reference to target expression"),
-                        span);
+                    self.logger.report_error(
+                        "Cannot take reference to target expression".to_string(),
+                        span,
+                    );
                     self.fatal_error();
                 }
-            },
+            }
             ast::DerefExpr(ref inner) => {
                 // Check that we can dereference the expression
                 let inner_type = self.resolve_type(scope, &inner.rtype);
@@ -446,53 +446,53 @@ impl<'a> CodeData<'a> {
 
                         // Then dereference it
                         self.load_var(inner_type.deref(), &Register(RESULT_REG));
-                    },
+                    }
                     types::StaticArray(..) => {
                         // Evaluate the inner expression
                         self.compile_expression(scope, inner);
                         // Since this is a static array we don't need to dereference it
-                    },
+                    }
                     _invalid => {
-                        self.logger.report_error(format!("type `{:?}` cannot be dereferenced",
-                            "FIXME"), span);
+                        self.logger.report_error(
+                            format!("type `{:?}` cannot be dereferenced", "FIXME"),
+                            span,
+                        );
                         self.fatal_error();
                     }
                 }
-            },
+            }
             ast::FieldRefExpr(ref inner) => {
                 self.compile_field_ref(scope, inner);
                 let inner_type = self.resolve_type(scope, &expression.rtype);
                 self.load_var(&inner_type, &Register(RESULT_REG));
-            },
+            }
             ast::ArrayIndexExpr(ref inner) => {
                 self.compile_array_index(scope, inner);
                 let inner_type = self.resolve_type(scope, &expression.rtype);
                 self.load_var(&inner_type, &Register(RESULT_REG));
-            },
+            }
             ast::IfExpr(ref inner) => self.compile_if(scope, inner),
             ast::ForLoopExpr(ref inner) => self.compile_for(scope, inner),
             ast::LoopExpr(ref inner) => self.compile_loop(scope, inner),
             ast::CallExpr(ref inner) => self.compile_call(scope, inner),
-            ast::Break => {
-                match scope.loop_ends.last() {
-                    Some(label) => self.instructions.push(asm::Jump(label.clone())),
-                    None => {
-                        self.logger.report_error(format!("`break` outside of loop"), span);
-                        self.fatal_error();
-                    },
+            ast::Break => match scope.loop_ends.last() {
+                Some(label) => self.instructions.push(asm::Jump(label.clone())),
+                None => {
+                    self.logger.report_error("`break` outside of loop".to_string(), span);
+                    self.fatal_error();
                 }
             },
             ast::Return(ref inner) => {
                 self.compile_expression(scope, inner);
                 let return_label = scope.end_label.clone();
                 self.instructions.push(asm::Jump(return_label));
-            },
+            }
             ast::LetExpr(ref inner) => self.compile_let(scope, inner),
             ast::AssignExpr(ref inner) => self.compile_assign(scope, inner),
             ast::VariableExpr(ref name) => {
                 let var = scope.get_ident(name, span).unwrap_var();
                 self.load_var(&var.rtype, &var.location);
-            },
+            }
             ast::StaticArrayExpr(ref inner) => self.compile_static_array(scope, inner),
             ast::LitStringExpr(ref inner) => {
                 // Convert the string into a byte array
@@ -500,7 +500,7 @@ impl<'a> CodeData<'a> {
                 let mut bytes = vec![];
 
                 // The remaining characters left to parse in this expression
-                let mut rem: &str = &inner;
+                let mut rem: &str = inner;
 
                 while let Some(mut next) = rem.chars().next() {
                     rem = &rem[next.len_utf8()..];
@@ -516,31 +516,28 @@ impl<'a> CodeData<'a> {
                     }
 
                     let expression = ast::Expression {
-                        expr: box ast::LitCharExpr(next),
+                        expr: Box::new(ast::LitCharExpr(next)),
                         rtype: ast::Primitive(ast::CharType),
-                        span: span.clone(),
+                        span,
                     };
                     bytes.push(expression);
                 }
 
-                let static_array = ast::StaticArray {
-                    elements: bytes,
-                    span: span.clone(),
-                };
+                let static_array = ast::StaticArray { elements: bytes, span };
                 self.compile_static_array(scope, &static_array);
-            },
+            }
             ast::StructInitExpr(ref inner) => self.compile_struct_init(scope, inner),
             ast::LitNumExpr(value) => {
                 self.instructions.push(asm::AddSignedValue(RESULT_REG, ZERO_REG, value as i16));
-            },
+            }
             ast::LitCharExpr(value) => {
                 self.instructions.push(asm::AddSignedValue(RESULT_REG, ZERO_REG, value as i16));
-            },
+            }
             ast::AsmOpExpr(ref inner) => {
                 self.instructions.push(asm::RawAsm(inner.clone()));
-            },
+            }
             ast::CastExpr(ref inner) => self.compile_expression(scope, inner),
-            ast::EmptyExpr => {},
+            ast::EmptyExpr => {}
         }
     }
 
@@ -550,30 +547,32 @@ impl<'a> CodeData<'a> {
         let target_type = self.resolve_type(scope, &field_ref.target.rtype);
         let target_base_type = self.type_table.base_type(&target_type);
 
-        let (field_offset, _) = self.find_field(target_base_type, &field_ref.field,
-            field_ref.span.clone());
+        let (field_offset, _) = self.find_field(target_base_type, &field_ref.field, field_ref.span);
 
         // Add the offset to the target address
         self.instructions.push(asm::AddUnsignedValue(RESULT_REG, RESULT_REG, field_offset));
     }
 
-    fn find_field(&self, target_type: &types::BaseType, field: &String, span: InputSpan)
-        -> (u16, types::Type)
-    {
+    fn find_field(
+        &self,
+        target_type: &types::BaseType,
+        field: &String,
+        span: InputSpan,
+    ) -> (u16, types::Type) {
         match *target_type {
-            types::Composite(ref inner) => {
-                match inner.fields.get(field) {
-                    Some(&(offset, ref type_)) => (offset, type_.clone()),
-                    None => {
-                        self.logger.report_error(format!("type `{:?}` has no field {:?}",
-                            target_type, field), span);
-                        self.fatal_error();
-                    }
+            types::Composite(ref inner) => match inner.fields.get(field) {
+                Some(&(offset, ref type_)) => (offset, type_.clone()),
+                None => {
+                    self.logger.report_error(
+                        format!("type `{:?}` has no field {:?}", target_type, field),
+                        span,
+                    );
+                    self.fatal_error();
                 }
             },
             ref invalid => {
-                self.logger.report_error(format!("type `{:?}` has no field {:?}", invalid, field),
-                    span);
+                self.logger
+                    .report_error(format!("type `{:?}` has no field {:?}", invalid, field), span);
                 self.fatal_error();
             }
         }
@@ -583,10 +582,12 @@ impl<'a> CodeData<'a> {
         // Check that the type that we are indexing can be indexed
         let target_type = self.resolve_type(scope, &index_expr.target.rtype);
         match target_type {
-            types::Pointer(..) | types::StaticArray(..) => {},
+            types::Pointer(..) | types::StaticArray(..) => {}
             _invalid => {
-                self.logger.report_error(format!("type `{:?}` cannot be dereferenced", "FIXME"),
-                    index_expr.span);
+                self.logger.report_error(
+                    format!("type `{:?}` cannot be dereferenced", "FIXME"),
+                    index_expr.span,
+                );
                 self.fatal_error();
             }
         }
@@ -596,7 +597,7 @@ impl<'a> CodeData<'a> {
 
         // Check that we are indexing with the correct type
         let index_type = self.resolve_type(scope, &index_expr.index.rtype);
-        self.check_type(&index_type, &INT_TYPE, index_expr.index.span.clone());
+        self.check_type(&index_type, &INT_TYPE, index_expr.index.span);
 
         // Multiply by the size of the target type
         let type_size = self.unaligned_size_of(target_type.deref());
@@ -624,7 +625,7 @@ impl<'a> CodeData<'a> {
 
         // Check that the expression returns a boolean type
         let cond_type = self.resolve_type(scope, &if_statement.condition.rtype);
-        self.check_type(&cond_type, &BOOL_TYPE, if_statement.span.clone());
+        self.check_type(&cond_type, &BOOL_TYPE, if_statement.span);
 
         let else_label = self.anon_label();
         let end_label = match if_statement.else_block {
@@ -650,12 +651,12 @@ impl<'a> CodeData<'a> {
 
                 // Check that both sides return the same type
                 let else_rtype = self.resolve_type(scope, &block.rtype());
-                self.check_type(&else_rtype, &then_rtype, block.span.clone());
+                self.check_type(&else_rtype, &then_rtype, block.span);
             }
             None => {
                 // If the else block was left unspecified, then the if statement must return the
                 // unit type
-                self.check_type(&then_rtype, &UNIT_TYPE, if_statement.span.clone());
+                self.check_type(&then_rtype, &UNIT_TYPE, if_statement.span);
             }
         }
 
@@ -676,7 +677,7 @@ impl<'a> CodeData<'a> {
             var_type: ast::Primitive(ast::IntType),
             assignment: None,
             is_const: false,
-            span: for_statement.span.clone(),
+            span: for_statement.span,
         };
         let loop_var_type = self.resolve_type(scope, &ast::Primitive(ast::IntType));
         let loop_var = Variable::new(loop_var_ast, loop_var_type, Offset(scope.next_offset), false);
@@ -686,34 +687,36 @@ impl<'a> CodeData<'a> {
         let end_var_offset = scope.next_offset - 4;
 
         let id = VarIdentId(scope.vars.len());
-        scope.add_ident(loop_var_name, id, for_statement.span.clone());
+        scope.add_ident(loop_var_name, id, for_statement.span);
         scope.vars.push(loop_var);
 
         // Compile the expression for the range end. The end range is written first, so that we have
         // the loop var ready in the RESULT_REG
         self.compile_expression(scope, &for_statement.end);
         // Write the end expression to the stack
-        self.instructions.push(asm::Store32(asm::Const(end_var_offset), FRAME_POINTER,
-            RESULT_REG));
+        self.instructions.push(asm::Store32(asm::Const(end_var_offset), FRAME_POINTER, RESULT_REG));
 
         // Check that the end expression has the correct type
         let end_type = self.resolve_type(scope, &for_statement.end.rtype);
-        self.check_type(&end_type, &INT_TYPE, for_statement.end.span.clone());
+        self.check_type(&end_type, &INT_TYPE, for_statement.end.span);
 
         // Compile the expression for the range start
         self.compile_expression(scope, &for_statement.start);
         // Write the start expression to the stack
-        self.instructions.push(asm::Store32(asm::Const(loop_var_offset), FRAME_POINTER,
-            RESULT_REG));
+        self.instructions.push(asm::Store32(
+            asm::Const(loop_var_offset),
+            FRAME_POINTER,
+            RESULT_REG,
+        ));
 
         // Check that the start expression has the correct type
         let start_type = self.resolve_type(scope, &for_statement.start.rtype);
-        self.check_type(&start_type, &INT_TYPE, for_statement.start.span.clone());
+        self.check_type(&start_type, &INT_TYPE, for_statement.start.span);
 
         let start_label = self.anon_label();
         let cond_label = self.anon_label();
         let end_label = self.anon_label();
-        scope.loop_ends.push(end_label.clone());
+        scope.loop_ends.push(end_label);
 
         // Check the condition before we start by jumping to the condition label
         self.instructions.push(asm::Jump(cond_label.clone()));
@@ -725,8 +728,11 @@ impl<'a> CodeData<'a> {
         // Increment the loop variable
         self.instructions.push(asm::Load32(RESULT_REG, asm::Const(loop_var_offset), FRAME_POINTER));
         self.instructions.push(asm::AddUnsignedValue(RESULT_REG, RESULT_REG, 1));
-        self.instructions.push(asm::Store32(asm::Const(loop_var_offset), FRAME_POINTER,
-            RESULT_REG));
+        self.instructions.push(asm::Store32(
+            asm::Const(loop_var_offset),
+            FRAME_POINTER,
+            RESULT_REG,
+        ));
 
         // Jump back to the start if we haven't finished the loop.
         // Note: The loop variable will be already loaded into RESULT_REG
@@ -741,7 +747,7 @@ impl<'a> CodeData<'a> {
 
         // Check that the body of the loop returns the correct type
         let body_rtype = self.resolve_type(scope, &for_statement.body.rtype());
-        self.check_type(&body_rtype, &UNIT_TYPE, for_statement.span.clone());
+        self.check_type(&body_rtype, &UNIT_TYPE, for_statement.span);
     }
 
     fn compile_loop(&mut self, scope: &mut Scope, loop_statement: &ast::LoopStatement) {
@@ -750,7 +756,7 @@ impl<'a> CodeData<'a> {
 
         // Add the end label to the loop ends vector, so that it can be used by breaks
         let end_label = self.anon_label();
-        scope.loop_ends.push(end_label.clone());
+        scope.loop_ends.push(end_label);
 
         self.compile_block(scope, &loop_statement.body);
 
@@ -763,7 +769,7 @@ impl<'a> CodeData<'a> {
 
         // Check that the body of the loop returns the correct type
         let body_rtype = self.resolve_type(scope, &loop_statement.body.rtype());
-        self.check_type(&body_rtype, &UNIT_TYPE, loop_statement.span.clone());
+        self.check_type(&body_rtype, &UNIT_TYPE, loop_statement.span);
     }
 
     fn compile_call(&mut self, scope: &mut Scope, call: &ast::FunctionCall) {
@@ -779,15 +785,18 @@ impl<'a> CodeData<'a> {
             // Write the result of the expression to the stack
             self.copy_var(&arg_type, RESULT_REG, STACK_POINTER);
             // Increment the stack
-            self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER,
-                arg_size as u16));
+            self.instructions.push(asm::AddUnsignedValue(
+                STACK_POINTER,
+                STACK_POINTER,
+                arg_size as u16,
+            ));
             stack_offset += arg_size as i16;
 
             call_args.push(arg_type);
         }
 
         // Get the function corresponding to the call
-        let function = match scope.get_ident(&call.name, call.span.clone()) {
+        let function = match scope.get_ident(&call.name, call.span) {
             FnIdent(ident) => ident,
             VarIdent(..) => panic!("ERROR_EXPECTED_FUNCTION_FOUND_VAR, TODO: Improve this error"),
         };
@@ -797,7 +806,7 @@ impl<'a> CodeData<'a> {
             panic!("INCORRECT NUMBER OF ARGUMENTS");
         }
         for (call_arg, fn_arg) in call_args.iter().zip(function.arg_types.iter()) {
-            self.check_type(call_arg, fn_arg, call.span.clone());
+            self.check_type(call_arg, fn_arg, call.span);
         }
 
         // Make the call
@@ -805,8 +814,11 @@ impl<'a> CodeData<'a> {
 
         // Restore the stack
         if stack_offset != 0 {
-            self.instructions.push(asm::SubUnsignedValue(STACK_POINTER, STACK_POINTER,
-                stack_offset as u16));
+            self.instructions.push(asm::SubUnsignedValue(
+                STACK_POINTER,
+                STACK_POINTER,
+                stack_offset as u16,
+            ));
         }
     }
 
@@ -817,15 +829,18 @@ impl<'a> CodeData<'a> {
 
         let rtype = self.resolve_type(scope, &let_statement.var_type);
 
-        let var = Variable::new(let_statement.clone(), rtype.clone(), Offset(scope.next_offset),
-            let_statement.is_const);
+        let var = Variable::new(
+            let_statement.clone(),
+            rtype.clone(),
+            Offset(scope.next_offset),
+            let_statement.is_const,
+        );
         scope.next_offset += self.size_of(&rtype) as i16;
         scope.vars.push(var);
 
         // Compile optional assignment
-        match let_statement.assignment {
-            Some(ref assignment) => self.compile_assign(scope, assignment),
-            None => {},
+        if let Some(assignment) = &let_statement.assignment {
+            self.compile_assign(scope, assignment)
         }
     }
 
@@ -836,14 +851,19 @@ impl<'a> CodeData<'a> {
 
         // Check that the rhs result matches the target
         let target_type = self.resolve_type(scope, &assignment.target.rtype);
-        self.check_type(&self.resolve_type(scope, &assignment.rhs.rtype), &target_type,
-            assignment.span.clone());
+        self.check_type(
+            &self.resolve_type(scope, &assignment.rhs.rtype),
+            &target_type,
+            assignment.span,
+        );
 
         // Get the address of where we want to place the variable
         let valid_address = self.compile_address(scope, &assignment.target);
         if !valid_address {
-            self.logger.report_error(format!("illegal left-hand side expression"),
-                assignment.target.span.clone());
+            self.logger.report_error(
+                "illegal left-hand side expression".to_string(),
+                assignment.target.span,
+            );
             self.fatal_error();
         };
 
@@ -862,30 +882,39 @@ impl<'a> CodeData<'a> {
         self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER, struct_size));
 
         for &(ref field_name, ref expression) in &struct_init.field_init {
-            let (field_offset, field_type) = self.find_field(&struct_base_type, field_name,
-                struct_init.span.clone());
+            let (field_offset, field_type) =
+                self.find_field(&struct_base_type, field_name, struct_init.span);
 
             self.compile_expression(scope, expression);
 
             // Check that the types match
-            self.check_type(&self.resolve_type(scope, &expression.rtype), &field_type,
-                struct_init.span.clone());
+            self.check_type(
+                &self.resolve_type(scope, &expression.rtype),
+                &field_type,
+                struct_init.span,
+            );
 
-            self.instructions.push(asm::AddSignedValue(TEMP_REG, STACK_POINTER,
-                (field_offset as i16) - (struct_size as i16)));
+            self.instructions.push(asm::AddSignedValue(
+                TEMP_REG,
+                STACK_POINTER,
+                (field_offset as i16) - (struct_size as i16),
+            ));
             self.copy_var(&field_type, RESULT_REG, TEMP_REG);
         }
 
         // Unreserve the memory from the struct
-        self.instructions.push(asm::AddSignedValue(STACK_POINTER, STACK_POINTER,
-            -(struct_size as i16)));
+        self.instructions.push(asm::AddSignedValue(
+            STACK_POINTER,
+            STACK_POINTER,
+            -(struct_size as i16),
+        ));
         // Return a pointer to the struct
         self.instructions.push(asm::AddUnsigned(RESULT_REG, STACK_POINTER, ZERO_REG));
     }
 
     fn compile_static_array(&mut self, scope: &mut Scope, array: &ast::StaticArray) {
         // Special case for a zero sized array
-        if array.elements.len() == 0 {
+        if array.elements.is_empty() {
             self.instructions.push(asm::AddUnsigned(RESULT_REG, STACK_POINTER, ZERO_REG));
             return;
         }
@@ -905,17 +934,19 @@ impl<'a> CodeData<'a> {
         for element in array.elements.iter().skip(1) {
             self.compile_expression(scope, element);
             self.copy_var(&element_type, RESULT_REG, STACK_POINTER);
-            self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER,
-                element_size));
+            self.instructions.push(asm::AddUnsignedValue(
+                STACK_POINTER,
+                STACK_POINTER,
+                element_size,
+            ));
             offset += element_size as i16;
         }
 
         // Ensure that the stack pointer is correctly aligned
         if offset % 4 != 0 {
             let pad = 4 - (offset % 4);
-            offset = offset + pad;
-            self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER,
-                pad as u16));
+            offset += pad;
+            self.instructions.push(asm::AddUnsignedValue(STACK_POINTER, STACK_POINTER, pad as u16));
         }
 
         // Unreserve the memory from the array
@@ -928,12 +959,12 @@ impl<'a> CodeData<'a> {
         match *var_type {
             CHAR_TYPE => {
                 self.instructions.push(asm::Store8(asm::Const(0), to, from));
-            },
+            }
 
             // These types are a single word in size
             INT_TYPE | BOOL_TYPE | types::Pointer(..) => {
                 self.instructions.push(asm::Store32(asm::Const(0), to, from));
-            },
+            }
 
             // Other types cannot be stored in a single word, and since there is no easy way to do
             // a memcopy in DLX we must manually copy all bytes. In this case, the from register
@@ -960,7 +991,7 @@ impl<'a> CodeData<'a> {
             ast::VariableExpr(ref name) => {
                 let var = scope.get_ident(name, span).unwrap_var();
                 self.address_of(&var.location);
-            },
+            }
 
             // Address of a dereference (aka don't dereference)
             ast::DerefExpr(ref inner) => self.compile_expression(scope, inner),
@@ -986,18 +1017,21 @@ impl<'a> CodeData<'a> {
                         // HACK to allow us to access some extra memory
                         self.address_of(location);
                         self.instructions.push(asm::Load8(RESULT_REG, asm::Const(0), RESULT_REG));
-                        //self.instructions.push(asm::Load8(RESULT_REG, asm::Unknown(label.clone()),
-                        //    ZERO_REG));
-                    },
+                        //self.instructions.push(asm::Load8(RESULT_REG,
+                        // asm::Unknown(label.clone()),    ZERO_REG));
+                    }
                     Offset(amount) => {
-                        self.instructions.push(asm::Load8(RESULT_REG, asm::Const(amount),
-                            FRAME_POINTER));
-                    },
+                        self.instructions.push(asm::Load8(
+                            RESULT_REG,
+                            asm::Const(amount),
+                            FRAME_POINTER,
+                        ));
+                    }
                     Register(id) => {
                         self.instructions.push(asm::Load8(RESULT_REG, asm::Const(0), id));
-                    },
+                    }
                 }
-            },
+            }
 
             // These types are word sized
             INT_TYPE | BOOL_TYPE | types::Pointer(..) => {
@@ -1006,18 +1040,21 @@ impl<'a> CodeData<'a> {
                         // HACK to allow us to access some extra memory
                         self.address_of(location);
                         self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), RESULT_REG));
-                        //self.instructions.push(asm::Load32(RESULT_REG, asm::Unknown(label.clone()),
-                        //    ZERO_REG));
-                    },
+                        //self.instructions.push(asm::Load32(RESULT_REG,
+                        // asm::Unknown(label.clone()),    ZERO_REG));
+                    }
                     Offset(amount) => {
-                        self.instructions.push(asm::Load32(RESULT_REG, asm::Const(amount),
-                            FRAME_POINTER));
-                    },
+                        self.instructions.push(asm::Load32(
+                            RESULT_REG,
+                            asm::Const(amount),
+                            FRAME_POINTER,
+                        ));
+                    }
                     Register(id) => {
                         self.instructions.push(asm::Load32(RESULT_REG, asm::Const(0), id));
-                    },
+                    }
                 }
-            },
+            }
             // These types cannot be stored in registers so we load their address into the result
             // reg
             _ => self.address_of(location),
@@ -1029,20 +1066,20 @@ impl<'a> CodeData<'a> {
             Label(ref label) => {
                 let asm = format!("        addui   r{},r{},{}", RESULT_REG, ZERO_REG, label);
                 self.instructions.push(asm::RawAsm(asm));
-            },
+            }
             Offset(offset) => {
                 self.instructions.push(asm::AddSignedValue(RESULT_REG, FRAME_POINTER, offset));
-            },
+            }
             Register(id) => {
                 self.instructions.push(asm::AddUnsigned(RESULT_REG, id, ZERO_REG));
-            },
+            }
         }
     }
 
     fn multiply_by(&mut self, num: usize) {
         // Check if it is a power of 2
         // TODO: Generate extra code for multiplications that are not a power of 2
-        if !(num & (num - 1) == 0) {
+        if num & (num - 1) != 0 {
             panic!("ICE, error multiplying by a number that is not a power of 2");
         }
 
@@ -1055,8 +1092,10 @@ impl<'a> CodeData<'a> {
     /// Check that a type is the same as the expected type or one path never returns
     fn check_type(&self, input: &Type, expected: &Type, span: InputSpan) {
         if input != &types::Bottom && expected != &types::Bottom && input != expected {
-            self.logger.report_error(format!("incorrect type, expected: {:?}, found: {:?}",
-                expected, input), span);
+            self.logger.report_error(
+                format!("incorrect type, expected: {:?}, found: {:?}", expected, input),
+                span,
+            );
             self.fatal_error();
         }
     }

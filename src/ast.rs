@@ -1,9 +1,6 @@
-use error::InputSpan;
+use crate::error::InputSpan;
 
-pub use ast::Item::*;
-pub use ast::PrimitiveType::*;
-pub use ast::Type::*;
-pub use ast::Expr::*;
+pub use crate::ast::{Expr::*, Item::*, PrimitiveType::*, Type::*};
 
 #[derive(Debug)]
 pub struct Program {
@@ -22,9 +19,9 @@ pub enum Item {
 impl Item {
     pub fn span(&self) -> InputSpan {
         match self {
-            &FunctionItem(ref x) => x.span.clone(),
-            &StructItem(ref x) => x.span.clone(),
-            &LetItem(ref x) => x.span.clone(),
+            FunctionItem(x) => x.span,
+            StructItem(x) => x.span,
+            LetItem(x) => x.span,
         }
     }
 }

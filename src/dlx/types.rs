@@ -1,9 +1,6 @@
-use std::collections::HashMap;
-use std::fmt;
+use std::{collections::HashMap, fmt};
 
-use ast;
-use dlx::codegen;
-use error::InputSpan;
+use crate::{ast, dlx::codegen, error::InputSpan};
 
 pub use self::BaseType::*;
 pub use self::Type::*;
@@ -21,11 +18,7 @@ impl CompositeType {
     /// Create blank type with only a name.
     /// This is useful for referencing an incomplete type with pointers.
     fn blank_type(name: String) -> CompositeType {
-        CompositeType {
-            name: name,
-            fields: HashMap::new(),
-            size: 0,
-        }
+        CompositeType { name, fields: HashMap::new(), size: 0 }
     }
 }
 
@@ -78,10 +71,10 @@ pub enum Type {
 
 impl Type {
     pub fn deref(&self) -> &Type {
-        match *self {
-            StaticArray(ref inner, _) => &inner,
-            Pointer(ref inner) => &inner,
-            ref invalid => panic!("ICE: Attempted to dereference `{:?}`", invalid),
+        match self {
+            StaticArray(inner, _) => inner,
+            Pointer(inner) => inner,
+            invalid => panic!("ICE: Attempted to dereference `{:?}`", invalid),
         }
     }
 }
@@ -93,34 +86,26 @@ pub struct TypeTable {
 
 impl TypeTable {
     pub fn resolve_type(&self, scope: &codegen::Scope, ast_type: &ast::Type) -> Type {
-        match *ast_type {
-            ast::VariableType(ref name) => scope.get_ident(name, InputSpan::invalid()).rtype(),
-            ast::Pointer(ref inner) => Pointer(box self.resolve_type(scope, &inner)),
-            ast::StaticArrayType(ref inner, size) => {
-                StaticArray(box self.resolve_type(scope, &inner), size as u16)
-            },
-            ast::DerefType(ref inner) => {
-                match self.resolve_type(scope, &inner) {
-                    Pointer(inner) => {
-                        *inner.clone()
-                    },
-                    StaticArray(inner, _) => {
-                        *inner.clone()
-                    },
-                    invalid => {
-                        panic!("type `{:?}` cannot be dereferenced", invalid);
-                    }
+        match ast_type {
+            ast::VariableType(name) => scope.get_ident(name, InputSpan::invalid()).rtype(),
+            ast::Pointer(inner) => Pointer(Box::new(self.resolve_type(scope, inner))),
+            ast::StaticArrayType(inner, size) => {
+                StaticArray(Box::new(self.resolve_type(scope, inner)), *size as u16)
+            }
+            ast::DerefType(inner) => match self.resolve_type(scope, inner) {
+                Pointer(inner) => *inner,
+                StaticArray(inner, _) => *inner,
+                invalid => {
+                    panic!("type `{:?}` cannot be dereferenced", invalid);
                 }
             },
-            ast::FieldRefType(ref inner, ref field_name) => {
-                let inner_type = self.resolve_type(scope, &inner);
-                match *self.base_type(&inner_type) {
-                    Composite(ref target_type) => {
-                        (target_type.fields[field_name].1).clone()
-                    },
-                    ref invalid => panic!("type `{:?}` has no field `{:?}`", invalid, field_name),
+            ast::FieldRefType(inner, field_name) => {
+                let inner_type = self.resolve_type(scope, inner);
+                match self.base_type(&inner_type) {
+                    Composite(target_type) => (target_type.fields[field_name].1).clone(),
+                    invalid => panic!("type `{:?}` has no field `{:?}`", invalid, field_name),
                 }
-            },
+            }
             ast::Primitive(ast::BottomType) => Bottom,
             ast::Primitive(ast::AnyType) => Any,
 
@@ -130,10 +115,10 @@ impl TypeTable {
     }
 
     pub fn base_type(&self, type_: &Type) -> &BaseType {
-        match *type_ {
-            Normal(id) => &self.types[id],
-            Pointer(ref inner) => self.base_type(&inner),
-            ref invalid => panic!("There is no base type associated with {:?}", invalid),
+        match type_ {
+            Normal(id) => &self.types[*id],
+            Pointer(inner) => self.base_type(inner),
+            invalid => panic!("There is no base type associated with {:?}", invalid),
         }
     }
 
@@ -142,9 +127,9 @@ impl TypeTable {
     }
 
     pub fn unaligned_size_of(&self, type_: &Type) -> u16 {
-        match *type_ {
-            Normal(id) => self.types[id].size(),
-            StaticArray(ref inner, size) => self.unaligned_size_of(&inner) * size,
+        match type_ {
+            Normal(id) => self.types[*id].size(),
+            StaticArray(inner, size) => self.unaligned_size_of(inner) * size,
             Pointer(..) => 4,
             Bottom => panic!("ICE: Attempted to determine size of bottom type"),
             Any => panic!("ICE: Attempted to determine size of any type"),
@@ -161,12 +146,7 @@ impl TypeTable {
 // Aligns types to words
 fn align(size: u16) -> u16 {
     let padding = size % 4;
-    if padding != 0 {
-        size + (4 - padding)
-    }
-    else {
-        size
-    }
+    if padding != 0 { size + (4 - padding) } else { size }
 }
 
 struct TypeGenData<'a> {
@@ -182,14 +162,12 @@ impl<'a> TypeGenData<'a> {
         for current_type in &struct_list {
             let (id, struct_decl) = match self.unresolved_map.get(current_type) {
                 // This type is in still in unresolved list so we need to resolve it
-                Some(&(id, ref struct_decl)) => {
-                    (id, struct_decl.clone())
-                }
+                Some(&(id, ref struct_decl)) => (id, struct_decl.clone()),
 
                 // Already resolved this type due to a dependency.
                 None => continue,
             };
-            let resolved = Composite(box self.gen_struct_type(&struct_decl));
+            let resolved = Composite(Box::new(self.gen_struct_type(&struct_decl)));
             self.type_table.types[id] = resolved;
         }
 
@@ -226,48 +204,46 @@ impl<'a> TypeGenData<'a> {
 
             // Already resolved this type due to a dependency.
             None => {
-                return self.type_table.resolve_type(&self.fake_scope, &ast::UserType(name.clone()));
-            },
+                return self
+                    .type_table
+                    .resolve_type(&self.fake_scope, &ast::UserType(name.clone()));
+            }
         };
-        let resolved = Composite(box self.gen_struct_type(&struct_decl));
+        let resolved = Composite(Box::new(self.gen_struct_type(&struct_decl)));
         self.type_table.types[id] = resolved;
         Normal(id)
     }
 
     fn gen_type(&mut self, ast_type: &ast::Type) -> Type {
-        match *ast_type {
+        match ast_type {
             // If this type is a pointer, we don't care if it hasn't been defined yet
-            ast::Pointer(ref inner) => {
-                Pointer(box self.type_table.resolve_type(&self.fake_scope, &inner))
-            },
+            ast::Pointer(inner) => {
+                Pointer(Box::new(self.type_table.resolve_type(&self.fake_scope, inner)))
+            }
 
             // If the type is a user defined type, then it must be fully resolved before we can
             // continue
-            ast::UserType(ref name) => self.full_resolve_type(name),
+            ast::UserType(name) => self.full_resolve_type(name),
 
-            ast::StaticArrayType(ref inner, size) => {
-                StaticArray(box self.gen_type(&inner), size as u16)
-            },
+            ast::StaticArrayType(inner, size) => {
+                StaticArray(Box::new(self.gen_type(inner)), *size as u16)
+            }
 
             // Primitive types should already be resolved
-            ref primitive @ ast::Primitive(..) => {
+            primitive @ ast::Primitive(..) => {
                 self.type_table.resolve_type(&self.fake_scope, primitive)
-            },
+            }
 
             // No other types are valid here
-            ref invalid => panic!("unexpected type: {:?}", invalid),
+            invalid => panic!("unexpected type: {:?}", invalid),
         }
     }
 }
 
-
 pub fn typegen(program: &ast::Program) -> TypeTable {
     let mut data = TypeGenData {
         unresolved_map: HashMap::new(),
-        type_table: TypeTable {
-            type_map: HashMap::new(),
-            types: vec![],
-        },
+        type_table: TypeTable { type_map: HashMap::new(), types: vec![] },
         fake_scope: codegen::Scope::new("TYPE_ERROR".to_string()),
     };
 
@@ -277,21 +253,19 @@ pub fn typegen(program: &ast::Program) -> TypeTable {
     data.type_table.add_mapping(ast::Primitive(ast::CharType), Char);
     data.type_table.add_mapping(ast::Primitive(ast::BoolType), Bool);
 
-
     let mut struct_list = vec![];
 
     for item in &program.items {
-        match *item {
-            ast::StructItem(ref struct_item) => {
-                let name = struct_item.name.clone();
-                let id = data.type_table.types.len();
-                data.unresolved_map.insert(name.clone(), (id, struct_item.clone()));
-                data.type_table.type_map.insert(ast::UserType(name.clone()), id);
-                data.type_table.types.push(Composite(box CompositeType::blank_type(name.clone())));
+        if let ast::StructItem(ref struct_item) = *item {
+            let name = struct_item.name.clone();
+            let id = data.type_table.types.len();
+            data.unresolved_map.insert(name.clone(), (id, struct_item.clone()));
+            data.type_table.type_map.insert(ast::UserType(name.clone()), id);
+            data.type_table
+                .types
+                .push(Composite(Box::new(CompositeType::blank_type(name.clone()))));
 
-                struct_list.push(name);
-            },
-            _ => {},
+            struct_list.push(name);
         }
     }
 

@@ -1,7 +1,7 @@
-use error::InputPos;
-pub use lexer::TokenValue::*;
+use crate::error::InputPos;
+pub use crate::lexer::TokenValue::*;
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(Eq, PartialEq, Clone, Debug)]
 pub enum TokenValue {
     LeftParen,
     RightParen,
@@ -48,7 +48,7 @@ pub enum TokenValue {
     Bool,
     Char,
     Int,
-    Uint,
+    _Uint,
     Any,
 
     True,
@@ -73,10 +73,7 @@ pub struct Lexer<'a> {
 
 impl<'a> Lexer<'a> {
     pub fn new(source: &str) -> Lexer {
-        Lexer {
-            remaining: source,
-            pos: InputPos::start(),
-        }
+        Lexer { remaining: source, pos: InputPos::start() }
     }
 
     fn bump(&mut self) {
@@ -86,10 +83,10 @@ impl<'a> Lexer<'a> {
                 '\n' => {
                     self.pos.line += 1;
                     self.pos.col = 0;
-                },
+                }
 
                 // Discard carrage return characters
-                '\r' => {},
+                '\r' => {}
 
                 // For other characters increase the column position
                 _ => self.pos.col += 1,
@@ -107,10 +104,10 @@ impl<'a> Lexer<'a> {
                 // Match comments
                 '#' => {
                     let comment_line = self.pos.line;
-                    while self.pos.line == comment_line && self.remaining.len() > 0 {
+                    while self.pos.line == comment_line && !self.remaining.is_empty() {
                         self.bump();
                     }
-                },
+                }
 
                 // Match other chars
                 _ => break,
@@ -149,48 +146,42 @@ impl<'a> Iterator for Lexer<'a> {
             '*' => Star,
             '&' => Amp,
 
-            '=' => {
-                match self.remaining.chars().nth(1) {
-                    Some('=') => {
-                        token_len += 1;
-                        Equal
-                    },
-                    _ => Assignment,
+            '=' => match self.remaining.chars().nth(1) {
+                Some('=') => {
+                    token_len += 1;
+                    Equal
                 }
+                _ => Assignment,
             },
 
-            '+' => {
-                match self.remaining.chars().nth(1) {
-                    Some('=') => {
-                        token_len += 1;
-                        PlusEq
-                    },
-                    _ => Plus,
+            '+' => match self.remaining.chars().nth(1) {
+                Some('=') => {
+                    token_len += 1;
+                    PlusEq
                 }
+                _ => Plus,
             },
 
-            '-' => {
-                match self.remaining.chars().nth(1) {
-                    Some('=') => {
-                        token_len += 1;
-                        MinusEq
-                    },
-                    Some('>') => {
-                        token_len += 1;
-                        RightArrow
-                    },
-                    _ => Minus,
+            '-' => match self.remaining.chars().nth(1) {
+                Some('=') => {
+                    token_len += 1;
+                    MinusEq
                 }
+                Some('>') => {
+                    token_len += 1;
+                    RightArrow
+                }
+                _ => Minus,
             },
 
-            '0'...'9' => {
+            '0'..='9' => {
                 token_len = scan_token(self.remaining);
                 let number_str = &self.remaining[..token_len];
                 match number_str.parse() {
                     Ok(n) => LitNum(n),
                     Err(e) => panic!("ICE: Invalid number: {}", e),
                 }
-            },
+            }
 
             '"' => {
                 self.bump();
@@ -198,12 +189,12 @@ impl<'a> Iterator for Lexer<'a> {
                     Some(offset) => offset,
                     None => {
                         panic!("Unclosed \" ");
-                    },
+                    }
                 };
                 let result = LitString(self.remaining[..token_len].to_string());
                 token_len += 1;
                 result
-            },
+            }
 
             '\'' => {
                 if len < 3 {
@@ -212,47 +203,44 @@ impl<'a> Iterator for Lexer<'a> {
                 self.bump();
                 let result = LitChar(self.remaining.chars().next().unwrap());
                 self.bump();
-                if self.remaining.chars().next().unwrap() != '\'' {
+                if !self.remaining.starts_with('\'') {
                     panic!("Unclosed '");
                 }
                 result
-            },
+            }
 
             _ => {
                 token_len = scan_token(self.remaining);
                 let token_str = &self.remaining[..token_len];
                 match token_str {
-                    "let"    => Let,
-                    "const"  => Const,
-                    "if"     => If,
-                    "for"    => For,
-                    "range"  => Range,
-                    "in"     => In,
-                    "while"  => While,
-                    "loop"   => Loop,
-                    "break"  => Break,
+                    "let" => Let,
+                    "const" => Const,
+                    "if" => If,
+                    "for" => For,
+                    "range" => Range,
+                    "in" => In,
+                    "while" => While,
+                    "loop" => Loop,
+                    "break" => Break,
                     "return" => Return,
-                    "else"   => Else,
-                    "asm"    => Asm,
-                    "fn"     => Fn,
+                    "else" => Else,
+                    "asm" => Asm,
+                    "fn" => Fn,
                     "struct" => Struct,
-                    "as"     => As,
-                    "true"   => True,
-                    "false"  => False,
-                    "null"   => Null,
-                    "int"    => Int,
-                    "char"   => Char,
-                    "bool"   => Bool,
-                    "any"    => Any,
-                    _        => Ident(token_str.to_string())
+                    "as" => As,
+                    "true" => True,
+                    "false" => False,
+                    "null" => Null,
+                    "int" => Int,
+                    "char" => Char,
+                    "bool" => Bool,
+                    "any" => Any,
+                    _ => Ident(token_str.to_string()),
                 }
             }
         };
 
-        let token = Token {
-            value: token_val,
-            pos: self.pos,
-        };
+        let token = Token { value: token_val, pos: self.pos };
         self.pos.col += token_len;
         self.remaining = &self.remaining[token_len..];
         Some(token)
@@ -261,13 +249,13 @@ impl<'a> Iterator for Lexer<'a> {
 
 /// Scans till the end of the token returning the index of the end of the token
 fn scan_token(string: &str) -> usize {
-    const TOKEN_BOUNDS: &'static [char] = &[
-        ' ', '\t', '\n', '\r', '#', ':', ';', ',', '(', ')', '{', '}', '[', ']', '.', '*', '&', '=',
-        '+', '-', '"', '\'',
+    const TOKEN_BOUNDS: &[char] = &[
+        ' ', '\t', '\n', '\r', '#', ':', ';', ',', '(', ')', '{', '}', '[', ']', '.', '*', '&',
+        '=', '+', '-', '"', '\'',
     ];
 
     match string.find(TOKEN_BOUNDS) {
         Some(n) => n,
-        None => string.len()
+        None => string.len(),
     }
 }
